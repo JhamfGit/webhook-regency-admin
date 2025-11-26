@@ -18,9 +18,6 @@ const EPS_TEAMS = {
   '5': { name: 'Particular', teamId: 5, label: 'particular' }
 };
 
-// Almacenar conversaciones: 'pending' = esperando selección, 'assigned' = ya asignada
-const conversationStates = new Map();
-
 // Webhook endpoint
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
@@ -28,7 +25,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     // 1. Detectar nueva conversación
     if (event === 'conversation_created') {
-      conversationStates.set(conversation.id, 'pending'); // Marcar como pendiente
       await sendWelcomeMessage(req.body);
     }
 
@@ -40,7 +36,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // 3. Detectar cierre de conversación
     if (event === 'conversation_resolved') {
       await sendClosingMessage(req.body);
-      conversationStates.delete(conversation.id); // Limpiar registro
     }
 
     res.status(200).send('OK');
@@ -78,19 +73,6 @@ async function assignToTeam(data) {
   const conversationId = data.conversation.id;
   const content = data.content?.trim();
   
-  // Verificar el estado de la conversación
-  const state = conversationStates.get(conversationId);
-  
-  // Si no está en el Map, asumimos que es una conversación nueva (por si acaso)
-  if (!state) {
-    conversationStates.set(conversationId, 'pending');
-  }
-  
-  // Si ya fue asignada, ignorar mensajes adicionales
-  if (state === 'assigned') {
-    return;
-  }
-  
   // Buscar el número en el mensaje (1-5)
   const option = content?.match(/^[1-5]$/)?.[0];
   
@@ -117,34 +99,14 @@ async function assignToTeam(data) {
       // 3. Confirmar asignación
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Espera un momento mientras te asignamos un agente.` },
+        { content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Espera un momento mientras te asiganamos un agente.` },
         { headers: { 'api_access_token': API_KEY } }
       );
-      
-      // 4. Marcar como asignada
-      conversationStates.set(conversationId, 'assigned');
       
       console.log(`✅ Asignado exitosamente a ${team.name}`);
     } catch (error) {
       console.error('❌ Error al asignar:', error.response?.data || error.message);
     }
-  } else {
-    // Respuesta inválida - solicitar nueva selección
-    console.log(`⚠️ Opción inválida recibida en conversación ${conversationId}: "${content}"`);
-    
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-      { 
-        content: `⚠️ Para poder atender con más celeridad tu solicitud, por favor selecciona tu EPS respondiendo con un número del 1 al 5:
-
-1️⃣ Comfenalco
-2️⃣ Coosalud
-3️⃣ SOS
-4️⃣ Salud Total
-5️⃣ Otro / Particular` 
-      },
-      { headers: { 'api_access_token': API_KEY } }
-    );
   }
 }
 
