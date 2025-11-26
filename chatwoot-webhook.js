@@ -18,8 +18,8 @@ const EPS_TEAMS = {
   '5': { name: 'Particular', teamId: 5, label: 'particular' }
 };
 
-// Almacenar conversaciones pendientes de selección (en memoria)
-const pendingConversations = new Set();
+// Almacenar conversaciones: 'pending' = esperando selección, 'assigned' = ya asignada
+const conversationStates = new Map();
 
 // Webhook endpoint
 app.post('/chatwoot-webhook', async (req, res) => {
@@ -28,8 +28,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     // 1. Detectar nueva conversación
     if (event === 'conversation_created') {
+      conversationStates.set(conversation.id, 'pending'); // Marcar como pendiente
       await sendWelcomeMessage(req.body);
-      pendingConversations.add(conversation.id); // Marcar como pendiente
     }
 
     // 2. Detectar respuesta del cliente
@@ -40,7 +40,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // 3. Detectar cierre de conversación
     if (event === 'conversation_resolved') {
       await sendClosingMessage(req.body);
-      pendingConversations.delete(conversation.id); // Limpiar registro
+      conversationStates.delete(conversation.id); // Limpiar registro
     }
 
     res.status(200).send('OK');
@@ -78,9 +78,17 @@ async function assignToTeam(data) {
   const conversationId = data.conversation.id;
   const content = data.content?.trim();
   
-  // Solo validar si la conversación está pendiente de selección
-  if (!pendingConversations.has(conversationId)) {
-    return; // Ya fue asignada o no requiere validación
+  // Verificar el estado de la conversación
+  const state = conversationStates.get(conversationId);
+  
+  // Si no está en el Map, asumimos que es una conversación nueva (por si acaso)
+  if (!state) {
+    conversationStates.set(conversationId, 'pending');
+  }
+  
+  // Si ya fue asignada, ignorar mensajes adicionales
+  if (state === 'assigned') {
+    return;
   }
   
   // Buscar el número en el mensaje (1-5)
@@ -113,8 +121,8 @@ async function assignToTeam(data) {
         { headers: { 'api_access_token': API_KEY } }
       );
       
-      // 4. Remover de pendientes (ya fue asignada)
-      pendingConversations.delete(conversationId);
+      // 4. Marcar como asignada
+      conversationStates.set(conversationId, 'assigned');
       
       console.log(`✅ Asignado exitosamente a ${team.name}`);
     } catch (error) {
