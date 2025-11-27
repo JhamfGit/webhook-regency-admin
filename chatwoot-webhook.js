@@ -72,15 +72,42 @@ Por favor, selecciona tu EPS para una atención personalizada:
 async function assignToTeam(data) {
   const conversationId = data.conversation.id;
   const content = data.content?.trim();
-  
+
+  // 🔵 1. SI YA TIENE EQUIPO ASIGNADO → NO VOLVER A PEDIR NÚMERO
+  if (data.conversation.team_id) {
+    console.log(`🔵 Conversación ${conversationId} ya asignada. No se solicita número nuevamente.`);
+    return;
+  }
+
   // Buscar el número en el mensaje (1-5)
   const option = content?.match(/^[1-5]$/)?.[0];
-  
-  if (option && EPS_TEAMS[option]) {
+
+  // 🔴 2. SI EL NÚMERO NO ES VÁLIDO → ENVIAR MENSAJE DE REINTENTO
+  if (!option) {
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+      { 
+        content: `⚠️ Por favor selecciona una opción válida respondiendo SOLO con un número del 1 al 5:
+
+1️⃣ Comfenalco  
+2️⃣ Coosalud  
+3️⃣ SOS  
+4️⃣ Salud Total  
+5️⃣ Particular / Otro`
+      },
+      { headers: { 'api_access_token': API_KEY } }
+    );
+
+    console.log(`❗ Opción inválida: "${content}" en conversación ${conversationId}`);
+    return; // 🔥 No continuar hasta que digite un número válido
+  }
+
+  // Si la opción es válida y existe dentro del mapa
+  if (EPS_TEAMS[option]) {
     const team = EPS_TEAMS[option];
-    
+
     console.log(`🎯 Asignando conversación ${conversationId} a ${team.name}`);
-    
+
     try {
       // 1. Asignar equipo
       await axios.post(
@@ -88,27 +115,28 @@ async function assignToTeam(data) {
         { team_id: team.teamId },
         { headers: { 'api_access_token': API_KEY } }
       );
-      
+
       // 2. Agregar etiqueta
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
         { labels: [team.label] },
         { headers: { 'api_access_token': API_KEY } }
       );
-      
+
       // 3. Confirmar asignación
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Espera un momento mientras te asiganamos un agente.` },
+        { content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Un agente te atenderá pronto.` },
         { headers: { 'api_access_token': API_KEY } }
       );
-      
+
       console.log(`✅ Asignado exitosamente a ${team.name}`);
     } catch (error) {
       console.error('❌ Error al asignar:', error.response?.data || error.message);
     }
   }
 }
+
 
 // Mensaje de cierre
 async function sendClosingMessage(data) {
