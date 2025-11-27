@@ -68,93 +68,83 @@ Por favor, selecciona tu EPS para una atención personalizada:
   );
 }
 
+// Memoria temporal
+const assignedConversations = new Set();
+
 // Asignar a equipo según respuesta
 async function assignToTeam(data) {
   const conversationId = data.conversation.id;
   const content = data.content?.trim();
 
-  // ------------------------------
-  // 1. CONSULTAR ESTADO REAL DE LA CONVERSACIÓN
-  // ------------------------------
-  let conversation;
-  try {
-    const response = await axios.get(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
-      { headers: { 'api_access_token': API_KEY } }
-    );
-    conversation = response.data;
-  } catch (error) {
-    console.error("❌ Error obteniendo conversación", error.response?.data || error.message);
+  // ---------------------------------
+  // 1. SI YA FUE ASIGNADA → IGNORAR
+  // ---------------------------------
+  if (assignedConversations.has(conversationId)) {
+    console.log(`🛑 Conversación ${conversationId} ya asignada. No mostrar menú.`);
     return;
   }
 
-  // SI YA ESTÁ ASIGNADA → NO HACER NADA
-  if (conversation.team_id) {
-    console.log(`🔵 Conversación ${conversationId} ya asignada al equipo ${conversation.team_id}.`);
-    return;
-  }
-
-  // Buscar número válido 1–5
+  // Buscar número 1–5
   const option = content?.match(/^[1-5]$/)?.[0];
 
-  // ------------------------------
-  // 2. SI EL NÚMERO ES INVÁLIDO → VOLVER A MOSTRAR MENÚ
-  // ------------------------------
+  // Si NO envió número válido → mostrar menú
   if (!option) {
     await axios.post(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
-        content: `⚠️ Por favor selecciona una opción válida respondiendo SOLO con un número del 1 al 5:
-
-1️⃣ Comfenalco  
-2️⃣ Coosalud  
-3️⃣ SOS  
-4️⃣ Salud Total  
+        content: `⚠️ Por favor selecciona una opción válida respondiendo SOLO con un número del 1 al 5:\n
+1️⃣ Comfenalco
+2️⃣ Coosalud
+3️⃣ SOS
+4️⃣ Salud Total
 5️⃣ Particular / Otro`
       },
       { headers: { 'api_access_token': API_KEY } }
     );
+
     return;
   }
 
-  // ------------------------------
-  // 3. SI EL NÚMERO ES CORRECTO → ASIGNAR EQUIPO
-  // ------------------------------
-  if (EPS_TEAMS[option]) {
-    const team = EPS_TEAMS[option];
+  // ---------------------------------
+  // 2. ASIGNAR SI EL NÚMERO ES VÁLIDO
+  // ---------------------------------
+  const team = EPS_TEAMS[option];
+  if (!team) return;
 
-    try {
-      // Asignar equipo
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/assignments`,
-        { team_id: team.teamId },
-        { headers: { 'api_access_token': API_KEY } }
-      );
+  try {
+    // Asignar equipo
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/assignments`,
+      { team_id: team.teamId },
+      { headers: { 'api_access_token': API_KEY } }
+    );
 
-      // Etiqueta
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
-        { labels: [team.label] },
-        { headers: { 'api_access_token': API_KEY } }
-      );
+    // Etiqueta
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
+      { labels: [team.label] },
+      { headers: { 'api_access_token': API_KEY } }
+    );
 
-      // Confirmar
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        {
-          content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Un agente te atenderá pronto.`
-        },
-        { headers: { 'api_access_token': API_KEY } }
-      );
+    // Confirmación
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+      {
+        content: `✅ Te hemos conectado con nuestro equipo de ${team.name}. Un agente te atenderá pronto.`
+      },
+      { headers: { 'api_access_token': API_KEY } }
+    );
 
-      console.log(`🎯 Conversación ${conversationId} asignada a ${team.name}`);
-    } catch (error) {
-      console.error("❌ Error asignando equipo:", error.response?.data || error.message);
-    }
+    // ---------------------------------
+    // 3. MARCAR COMO ASIGNADA
+    // ---------------------------------
+    assignedConversations.add(conversationId);
+
+    console.log(`🎯 Conversación ${conversationId} asignada exitosamente.`);
+  } catch (error) {
+    console.error("❌ Error asignando equipo:", error.response?.data || error.message);
   }
 }
-
-
 
 // Mensaje de cierre
 async function sendClosingMessage(data) {
