@@ -56,6 +56,16 @@ async function assignToTeam(data) {
     return;
   }
 
+  // ---------------------------------
+  // 2. SI YA TIENE AGENTE ASIGNADO → IGNORAR
+  // ---------------------------------
+  const assigneeId = data.conversation?.assignee_id;
+  if (assigneeId) {
+    console.log(`👤 Conversación ${conversationId} ya tiene agente asignado. No validar EPS.`);
+    assignedConversations.add(conversationId); // Marcar como asignada
+    return;
+  }
+
   // Buscar número 1–5
   const option = content?.match(/^[1-5]$/)?.[0];
 
@@ -136,4 +146,3 @@ app.listen(3000, () => {
   console.log('✅ Webhook server running on port 3000');
   console.log('📍 Endpoint: POST /chatwoot-webhook');
 });
-
