@@ -23,13 +23,15 @@ app.post('/chatwoot-webhook', async (req, res) => {
   try {
     const { event, message_type } = req.body;
 
+    console.log(`📨 Evento recibido: ${event}, tipo: ${message_type}`);
+
     // 1. Detectar respuesta del cliente
     if (event === 'message_created' && message_type === 'incoming') {
       await assignToTeam(req.body);
     }
 
-    // 2. Detectar cierre de conversación
-    if (event === 'conversation_resolved') {
+    // 2. Detectar cierre de conversación (solo si lo necesitas)
+    if (event === 'conversation_status_changed' && req.body.status === 'resolved') {
       await sendClosingMessage(req.body);
     }
 
@@ -47,12 +49,55 @@ const assignedConversations = new Set();
 async function assignToTeam(data) {
   const conversationId = data.conversation.id;
   const content = data.content?.trim();
+  const conversationStatus = data.conversation?.status;
 
   // ---------------------------------
-  // 1. SI YA FUE ASIGNADA → IGNORAR
+  // 1. SI YA FUE ASIGNADA EN MEMORIA → IGNORAR
   // ---------------------------------
   if (assignedConversations.has(conversationId)) {
-    console.log(`🛑 Conversación ${conversationId} ya asignada. No mostrar menú.`);
+    console.log(`🛑 Conversación ${conversationId} ya procesada. Ignorando.`);
+    return;
+  }
+
+  // ---------------------------------
+  // 2. SI YA TIENE AGENTE ASIGNADO → IGNORAR
+  // ---------------------------------
+  const assigneeId = data.conversation?.assignee_id;
+  if (assigneeId) {
+    console.log(`👤 Conversación ${conversationId} ya tiene agente asignado. Ignorando.`);
+    assignedConversations.add(conversationId);
+    return;
+  }
+
+  // ---------------------------------
+  // 3. SI YA TIENE EQUIPO ASIGNADO → IGNORAR
+  // ---------------------------------
+  const teamId = data.conversation?.team?.id;
+  if (teamId) {
+    console.log(`👥 Conversación ${conversationId} ya tiene equipo asignado (ID: ${teamId}). Ignorando.`);
+    assignedConversations.add(conversationId);
+    return;
+  }
+
+  // ---------------------------------
+  // 4. SI YA TIENE ETIQUETA DE EPS → IGNORAR
+  // ---------------------------------
+  const labels = data.conversation?.labels || [];
+  const hasEPSLabel = labels.some(label => 
+    ['comfenalco', 'coosalud', 'sos', 'salud-total', 'particular'].includes(label)
+  );
+  
+  if (hasEPSLabel) {
+    console.log(`🏷️ Conversación ${conversationId} ya tiene etiqueta de EPS. Ignorando.`);
+    assignedConversations.add(conversationId);
+    return;
+  }
+
+  // ---------------------------------
+  // 5. SOLO PROCESAR CONVERSACIONES "PENDING" O "OPEN" SIN ASIGNAR
+  // ---------------------------------
+  if (conversationStatus !== 'pending' && conversationStatus !== 'open') {
+    console.log(`⏭️ Conversación ${conversationId} en estado "${conversationStatus}". Ignorando.`);
     return;
   }
 
