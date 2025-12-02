@@ -5,17 +5,17 @@ const app = express();
 app.use(express.json());
 
 // Configuración - REEMPLAZA CON TUS DATOS
-const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://atencion.vitalia.jhamf.com';
+const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://support.jhamf.com';
 const API_KEY = process.env.API_KEY;
-const ACCOUNT_ID = process.env.ACCOUNT_ID || '1';
+const ACCOUNT_ID = process.env.ACCOUNT_ID || '8';
 
 // Mapeo de opciones a equipos - REEMPLAZA CON TUS IDs DE EQUIPO
 const EPS_TEAMS = {
-  '1': { name: 'Comfenalco', teamId: 1, label: 'comfenalco' },
-  '2': { name: 'Coosalud', teamId: 2, label: 'coosalud' },
+  '1': { name: 'Comfenalco', teamId: 5, label: 'comfenalco' },
+  '2': { name: 'Coosalud', teamId: 4, label: 'coosalud' },
   '3': { name: 'SOS', teamId: 3, label: 'sos' },
-  '4': { name: 'Salud Total', teamId: 4, label: 'salud-total' },
-  '5': { name: 'Particular', teamId: 5, label: 'particular' }
+  '4': { name: 'Salud Total', teamId: 6, label: 'salud-total' },
+  '5': { name: 'Particular', teamId: 7, label: 'particular' }
 };
 
 // Webhook endpoint
