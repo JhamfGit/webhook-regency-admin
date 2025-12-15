@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // Configuración - REEMPLAZA CON TUS DATOS
-const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://support.jhamf.com';
+const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://seleccion.regency.jhamf.com';
 const API_KEY = process.env.API_KEY;
 const ACCOUNT_ID = process.env.ACCOUNT_ID || '9';
 
