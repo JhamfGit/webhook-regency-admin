@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // Configuración - REEMPLAZA CON TUS DATOS
-const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://seleccion.regency.jhamf.com';
+const CHATWOOT_URL = process.env.CHATWOOT_URL || 'https://support.jhamf.com';
 const API_KEY = process.env.API_KEY;
 const ACCOUNT_ID = process.env.ACCOUNT_ID || '9';
 
@@ -40,7 +40,9 @@ app.post('/chatwoot-webhook', async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log('✅ Webhook server running on port 3000');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Webhook server running on port ${PORT}`);
   console.log('📍 Endpoint: POST /chatwoot-webhook');
 });
