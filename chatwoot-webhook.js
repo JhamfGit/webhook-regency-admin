@@ -19,32 +19,25 @@ app.post('/chatwoot-webhook', (req, res) => {
     try {
       const { event, message_type, conversation, content } = req.body;
 
-      console.log(`📨 Evento: ${event}, tipo: ${message_type}`);
-
       if (event === 'message_created' && message_type === 'incoming') {
         if (!API_KEY) {
           console.error('❌ API_KEY no definida');
           return;
         }
 
-        const conversationId = conversation.id;
-
         await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversation.id}/messages`,
           { content: '✅ Entró al webhook' },
           { headers: { api_access_token: API_KEY } }
         );
-
-        console.log(`✅ Mensaje enviado a ${conversationId}`);
-        console.log(`📝 Usuario escribió: ${content}`);
       }
-    } catch (error) {
-      console.error('❌ Error webhook:', error.response?.data || error.message);
+    } catch (err) {
+      console.error('❌ Error webhook:', err.message);
     }
   })();
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on ${PORT}`);
