@@ -37,7 +37,7 @@ app.post('/chatwoot-webhook', (req, res) => {
   })();
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3080;
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on ${PORT}`);
