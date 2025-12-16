@@ -60,6 +60,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // RESPUESTA "SI" → ENVIAR PLANTILLA
     // ================================
     if (userMessage === 'si') {
+      console.log('🔍 Detectado "Si", intentando enviar plantilla...');
+      console.log('📞 Phone ID:', WHATSAPP_PHONE_ID);
+      console.log('🔑 Token configurado:', WHATSAPP_API_TOKEN ? 'SÍ' : 'NO');
+      console.log('👤 Usuario:', userPhone);
+
       // 🆕 ENVIAR DIRECTO A WHATSAPP API
       const whatsappResponse = await axios.post(
         `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
@@ -139,7 +144,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
     res.status(200).json({ ok: true });
     
   } catch (error) {
-    console.error('❌ Error webhook:', error.response?.data || error.message);
+    console.error('❌ ERROR COMPLETO:', error);
+    console.error('❌ Error response:', error.response?.data);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
     res.status(500).json({ error: 'Webhook error' });
   }
 });
