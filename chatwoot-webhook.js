@@ -62,9 +62,9 @@ app.post('/chatwoot-webhook', async (req, res) => {
           content_type: 'text',
           content: '',
           template_params: {
-            name: 'seleccion_certificado_bachiller - es_CO',
+            name: 'seleccion_certificado_bachiller_es_CO', // ✅ nombre real
             category: 'UTILITY',
-            language: 'es',
+            language: 'es_CO', // ✅ idioma exacto
             components: []
           }
         },
@@ -75,9 +75,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
           }
         }
       );
-
+    
       console.log('✅ Plantilla WhatsApp enviada correctamente');
     }
+
 
     // ================================
     // RESPUESTA "NO"
