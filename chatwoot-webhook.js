@@ -65,44 +65,64 @@ app.post('/chatwoot-webhook', async (req, res) => {
       console.log('🔑 Token configurado:', WHATSAPP_API_TOKEN ? 'SÍ' : 'NO');
       console.log('👤 Usuario:', userPhone);
 
-      // 🆕 ENVIAR DIRECTO A WHATSAPP API
-      const whatsappResponse = await axios.post(
-        `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
-        {
-          messaging_product: "whatsapp",
-          to: userPhone,
-          type: "template",
-          template: {
-            name: "seleccion_certificado_bachiller_es_CO",
-            language: {
-              code: "es_CO"
+      try {
+        // 🆕 ENVIAR DIRECTO A WHATSAPP API
+        const whatsappResponse = await axios.post(
+          `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+          {
+            messaging_product: "whatsapp",
+            to: userPhone,
+            type: "template",
+            template: {
+              name: "seleccion_certificado_bachiller", // ✅ Corregido: sin _es_CO
+              language: {
+                code: "es_CO"
+              }
+            }
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+              'Content-Type': 'application/json'
             }
           }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+        );
 
-      console.log('✅ Plantilla WhatsApp enviada:', whatsappResponse.data);
+        console.log('✅ Plantilla WhatsApp enviada:', whatsappResponse.data);
 
-      // Opcional: Registrar en Chatwoot que enviaste una plantilla
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        {
-          content: '📋 Plantilla de certificado enviada',
-          private: true // Nota privada solo para agentes
-        },
-        {
-          headers: {
-            api_access_token: API_KEY,
-            'Content-Type': 'application/json'
+        // Opcional: Registrar en Chatwoot que enviaste una plantilla
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content: '📋 Plantilla de certificado enviada',
+            private: true // Nota privada solo para agentes
+          },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
           }
-        }
-      );
+        );
+      } catch (whatsappError) {
+        console.error('❌ ERROR WHATSAPP API:', whatsappError.response?.data);
+        console.error('❌ Status:', whatsappError.response?.status);
+        
+        // Enviar mensaje de error en Chatwoot
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content: `⚠️ Error al enviar plantilla: ${JSON.stringify(whatsappError.response?.data)}`,
+            private: true
+          },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+      }
     }
     
     // ================================
