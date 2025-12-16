@@ -4,79 +4,117 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-// VARIABLES (Railway)
+// ================================
+// VARIABLES DE ENTORNO (Railway)
+// ================================
 const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const API_KEY = process.env.API_KEY;
 const ACCOUNT_ID = process.env.ACCOUNT_ID;
 
+// ================================
+// HEALTH CHECK
+// ================================
 app.get('/', (req, res) => {
   res.status(200).send('OK');
 });
 
+// ================================
+// WEBHOOK CHATWOOT
+// ================================
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
-    const { event, message_type, conversation, content } = req.body;
+    const {
+      event,
+      message_type,
+      conversation,
+      content,
+      additional_attributes
+    } = req.body;
 
     console.log('📩 Webhook recibido:', req.body);
 
-    if (event === 'message_created' && message_type === 'incoming') {
-      const conversationId = conversation.id;
-      const userMessage = (content || '').trim().toLowerCase();
+    // 🚫 1. Ignorar eventos que no sean mensajes entrantes
+    if (event !== 'message_created' || message_type !== 'incoming') {
+      return res.status(200).json({ ignored: 'not incoming message' });
+    }
 
-      // 👉 RESPUESTA "SI" → DISPARAR PLANTILLA
-      
-      if (userMessage === 'si') {
-        await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-          {
-            content_type: 'text',
-            content: '',
-            template_params: {
-              name: 'seleccion_certificado_bachiller',
-              category: 'UTILITY',
-              language: 'es',
-              components: []
-            }
-          },
-          {
-            headers: {
-              api_access_token: API_KEY,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-      
-        console.log('✅ Plantilla WhatsApp enviada correctamente');
-      }
-      
+    // 🚫 2. Ignorar mensajes generados por plantillas (anti-loop)
+    if (additional_attributes?.template_params) {
+      console.log('🔁 Mensaje de plantilla ignorado');
+      return res.status(200).json({ ignored: 'template message' });
+    }
 
-      // 👉 RESPUESTA "NO"
-      else if (userMessage === 'no') {
-        await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-          { content: 'rechazado' },
-          {
-            headers: {
-              api_access_token: API_KEY,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-      }
+    // 🚫 3. Ignorar mensajes vacíos
+    if (!content || !content.trim()) {
+      return res.status(200).json({ ignored: 'empty message' });
+    }
 
-      // 👉 RESPUESTA INVÁLIDA
-      else {
-        await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-          { content: 'Por favor seleccione una opción válida (Si, No)' },
-          {
-            headers: {
-              api_access_token: API_KEY,
-              'Content-Type': 'application/json'
-            }
+    const conversationId = conversation.id;
+    const userMessage = content.trim().toLowerCase();
+
+    // ================================
+    // RESPUESTA "SI" → ENVIAR PLANTILLA
+    // ================================
+    if (userMessage === 'si') {
+      await axios.post(
+        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+        {
+          content_type: 'text',
+          content: '',
+          template_params: {
+            name: 'seleccion_certificado_bachiller',
+            category: 'UTILITY',
+            language: 'es',
+            components: []
           }
-        );
-      }
+        },
+        {
+          headers: {
+            api_access_token: API_KEY,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('✅ Plantilla WhatsApp enviada correctamente');
+    }
+
+    // ================================
+    // RESPUESTA "NO"
+    // ================================
+    else if (userMessage === 'no') {
+      await axios.post(
+        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+        { content: 'rechazado' },
+        {
+          headers: {
+            api_access_token: API_KEY,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('❌ Respuesta: rechazado');
+    }
+
+    // ================================
+    // RESPUESTA INVÁLIDA
+    // ================================
+    else {
+      await axios.post(
+        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+        {
+          content: 'Por favor seleccione una opción válida (Si, No)'
+        },
+        {
+          headers: {
+            api_access_token: API_KEY,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('⚠️ Opción inválida');
     }
 
     res.status(200).json({ ok: true });
@@ -86,6 +124,9 @@ app.post('/chatwoot-webhook', async (req, res) => {
   }
 });
 
+// ================================
+// SERVER
+// ================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on ${PORT}`);
