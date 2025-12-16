@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-
 const app = express();
 app.use(express.json());
 
@@ -10,6 +9,10 @@ app.use(express.json());
 const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const API_KEY = process.env.API_KEY;
 const ACCOUNT_ID = process.env.ACCOUNT_ID;
+
+// 🆕 NECESITAS AGREGAR ESTAS VARIABLES:
+const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN; // Token de WhatsApp Business API
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;   // Phone number ID de WhatsApp
 
 // ================================
 // HEALTH CHECK
@@ -31,7 +34,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       additional_attributes
     } = req.body;
 
-    console.log('📩 Webhook recibido:', req.body);
+    console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
 
     // 🚫 1. Ignorar eventos que no sean mensajes entrantes
     if (event !== 'message_created' || message_type !== 'incoming') {
@@ -51,22 +54,42 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     const conversationId = conversation.id;
     const userMessage = content.trim().toLowerCase();
+    const userPhone = conversation.contact_inbox.source_id; // Número del usuario
 
     // ================================
     // RESPUESTA "SI" → ENVIAR PLANTILLA
     // ================================
     if (userMessage === 'si') {
+      // 🆕 ENVIAR DIRECTO A WHATSAPP API
+      const whatsappResponse = await axios.post(
+        `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+        {
+          messaging_product: "whatsapp",
+          to: userPhone,
+          type: "template",
+          template: {
+            name: "seleccion_certificado_bachiller_es_CO",
+            language: {
+              code: "es_CO"
+            }
+          }
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('✅ Plantilla WhatsApp enviada:', whatsappResponse.data);
+
+      // Opcional: Registrar en Chatwoot que enviaste una plantilla
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
         {
-          content_type: 'text',
-          content: '',
-          template_params: {
-            name: 'seleccion_certificado_bachiller_es_CO', // ✅ nombre real
-            category: 'UTILITY',
-            language: 'es_CO', // ✅ idioma exacto
-            components: []
-          }
+          content: '📋 Plantilla de certificado enviada',
+          private: true // Nota privada solo para agentes
         },
         {
           headers: {
@@ -75,18 +98,15 @@ app.post('/chatwoot-webhook', async (req, res) => {
           }
         }
       );
-    
-      console.log('✅ Plantilla WhatsApp enviada correctamente');
     }
-
-
+    
     // ================================
     // RESPUESTA "NO"
     // ================================
     else if (userMessage === 'no') {
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: 'rechazado' },
+        { content: 'Entendido, solicitud cancelada.' },
         {
           headers: {
             api_access_token: API_KEY,
@@ -94,10 +114,9 @@ app.post('/chatwoot-webhook', async (req, res) => {
           }
         }
       );
-
       console.log('❌ Respuesta: rechazado');
     }
-
+    
     // ================================
     // RESPUESTA INVÁLIDA
     // ================================
@@ -114,11 +133,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
           }
         }
       );
-
       console.log('⚠️ Opción inválida');
     }
 
     res.status(200).json({ ok: true });
+    
   } catch (error) {
     console.error('❌ Error webhook:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
@@ -132,4 +151,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on ${PORT}`);
 });
-
