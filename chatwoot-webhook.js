@@ -9,10 +9,26 @@ app.use(express.json());
 const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const API_KEY = process.env.API_KEY;
 const ACCOUNT_ID = process.env.ACCOUNT_ID;
+const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
-// 🆕 NECESITAS AGREGAR ESTAS VARIABLES:
-const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN; // Token de WhatsApp Business API
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;   // Phone number ID de WhatsApp
+// ================================
+// FLUJO DE PLANTILLAS
+// ================================
+const TEMPLATE_FLOW = {
+  inicio: 'seleccion_certificado_bachiller',
+  seleccion_certificado_bachiller: 'seleccion_ubicacion_desplazamiento',
+  seleccion_ubicacion_desplazamiento: 'seleccion_familiares_empresa',
+  seleccion_familiares_empresa: 'seleccion_vinculacion_previa',
+  seleccion_vinculacion_previa: 'fin'
+};
+
+const TEMPLATE_NAMES = {
+  seleccion_certificado_bachiller: 'certificado de bachiller',
+  seleccion_ubicacion_desplazamiento: 'ubicación y desplazamiento',
+  seleccion_familiares_empresa: 'familiares en la empresa',
+  seleccion_vinculacion_previa: 'vinculación previa'
+};
 
 // ================================
 // HEALTH CHECK
@@ -26,7 +42,6 @@ app.get('/', (req, res) => {
 // ================================
 app.get('/get-phone-id', async (req, res) => {
   try {
-    // Primero obtener el Business Account ID
     const businessResponse = await axios.get(
       'https://graph.facebook.com/v18.0/me/businesses',
       {
@@ -42,7 +57,6 @@ app.get('/get-phone-id', async (req, res) => {
       return res.json({ error: 'No business found', data: businessResponse.data });
     }
 
-    // Luego obtener los números de WhatsApp
     const wabaResponse = await axios.get(
       `https://graph.facebook.com/v18.0/${businessId}/client_whatsapp_business_accounts`,
       {
@@ -58,7 +72,6 @@ app.get('/get-phone-id', async (req, res) => {
       return res.json({ error: 'No WABA found', businessId, data: wabaResponse.data });
     }
 
-    // Finalmente obtener los phone numbers
     const phoneResponse = await axios.get(
       `https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`,
       {
@@ -80,6 +93,78 @@ app.get('/get-phone-id', async (req, res) => {
     });
   }
 });
+
+// ================================
+// FUNCIONES AUXILIARES
+// ================================
+
+// Obtener el estado actual de la conversación
+async function getConversationState(conversationId) {
+  try {
+    const response = await axios.get(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
+      {
+        headers: {
+          api_access_token: API_KEY
+        }
+      }
+    );
+    
+    return response.data.custom_attributes?.template_state || 'inicio';
+  } catch (error) {
+    console.error('Error obteniendo estado:', error.message);
+    return 'inicio';
+  }
+}
+
+// Actualizar el estado de la conversación
+async function updateConversationState(conversationId, newState) {
+  try {
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
+      {
+        custom_attributes: {
+          template_state: newState
+        }
+      },
+      {
+        headers: {
+          api_access_token: API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    console.log(`✅ Estado actualizado a: ${newState}`);
+  } catch (error) {
+    console.error('Error actualizando estado:', error.message);
+  }
+}
+
+// Enviar plantilla de WhatsApp
+async function sendWhatsAppTemplate(userPhone, templateName) {
+  const response = await axios.post(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to: userPhone,
+      type: "template",
+      template: {
+        name: templateName,
+        language: {
+          code: "es_CO"
+        }
+      }
+    },
+    {
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  
+  return response.data;
+}
 
 // ================================
 // WEBHOOK CHATWOOT
@@ -114,70 +199,26 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     const conversationId = conversation.id;
     const userMessage = content.trim().toLowerCase();
-    const userPhone = conversation.contact_inbox.source_id; // Número del usuario
+    const userPhone = conversation.contact_inbox.source_id;
 
     // ================================
-    // LÓGICA DE FLUJO CON PLANTILLAS
-    // ================================
-    
-    // Obtener el último mensaje del agente para determinar el contexto
-    const lastAgentMessage = conversation.messages?.[conversation.messages.length - 2];
-    const isAfterCertificadoBachiller = lastAgentMessage?.content?.includes('certificado de bachiller');
-
-    // ================================
-    // RESPUESTA "SI" → ENVIAR PLANTILLA
+    // RESPUESTA "SI" → CONTINUAR FLUJO
     // ================================
     if (userMessage === 'si') {
-      let templateName = '';
-      let successMessage = '';
+      // Obtener estado actual
+      const currentState = await getConversationState(conversationId);
+      console.log(`📍 Estado actual: ${currentState}`);
 
-      // Determinar qué plantilla enviar según el contexto
-      if (isAfterCertificadoBachiller) {
-        templateName = 'seleccion_ubicacion_desplazamiento';
-        successMessage = '📋 Plantilla de ubicación/desplazamiento enviada';
-      } else {
-        // Primera plantilla (por defecto)
-        templateName = 'seleccion_certificado_bachiller';
-        successMessage = '📋 Plantilla de certificado enviada';
-      }
-
-      console.log(`🎯 Contexto detectado, enviando plantilla: ${templateName}`);
-      console.log('🔍 Detectado "Si", intentando enviar plantilla...');
-      console.log('📞 Phone ID:', WHATSAPP_PHONE_ID);
-      console.log('🔑 Token configurado:', WHATSAPP_API_TOKEN ? 'SÍ' : 'NO');
-      console.log('👤 Usuario:', userPhone);
-
-      try {
-        // 🆕 ENVIAR DIRECTO A WHATSAPP API
-        const whatsappResponse = await axios.post(
-          `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
-          {
-            messaging_product: "whatsapp",
-            to: userPhone,
-            type: "template",
-            template: {
-              name: templateName, // ✅ Nombre dinámico según contexto
-              language: {
-                code: "es_CO"
-              }
-            }
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-        console.log('✅ Plantilla WhatsApp enviada:', whatsappResponse.data);
-
-        // Opcional: Registrar en Chatwoot que enviaste una plantilla
+      // Determinar siguiente plantilla
+      const nextTemplate = TEMPLATE_FLOW[currentState];
+      
+      if (nextTemplate === 'fin') {
+        console.log('✅ Flujo completado');
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
           {
-            content: successMessage, // ✅ Mensaje dinámico
-            private: true // Nota privada solo para agentes
+            content: '✅ Proceso de selección completado. Gracias por tu tiempo.',
+            private: false
           },
           {
             headers: {
@@ -186,11 +227,40 @@ app.post('/chatwoot-webhook', async (req, res) => {
             }
           }
         );
+        
+        // Resetear estado
+        await updateConversationState(conversationId, 'inicio');
+        return res.status(200).json({ ok: true });
+      }
+
+      console.log(`🎯 Enviando plantilla: ${nextTemplate}`);
+
+      try {
+        // Enviar plantilla
+        const whatsappResponse = await sendWhatsAppTemplate(userPhone, nextTemplate);
+        console.log('✅ Plantilla WhatsApp enviada:', whatsappResponse);
+
+        // Actualizar estado
+        await updateConversationState(conversationId, nextTemplate);
+
+        // Nota privada en Chatwoot
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content: `📋 Plantilla enviada: ${TEMPLATE_NAMES[nextTemplate] || nextTemplate}`,
+            private: true
+          },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
       } catch (whatsappError) {
         console.error('❌ ERROR WHATSAPP API:', whatsappError.response?.data);
-        console.error('❌ Status:', whatsappError.response?.status);
         
-        // Enviar mensaje de error en Chatwoot
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
           {
@@ -208,12 +278,14 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
     
     // ================================
-    // RESPUESTA "NO"
+    // RESPUESTA "NO" → TERMINAR FLUJO
     // ================================
     else if (userMessage === 'no') {
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: 'Entendido, solicitud cancelada.' },
+        {
+          content: 'Entendido, proceso de selección cancelado. Gracias por tu tiempo.'
+        },
         {
           headers: {
             api_access_token: API_KEY,
@@ -221,7 +293,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
           }
         }
       );
-      console.log('❌ Respuesta: rechazado');
+      
+      // Resetear estado
+      await updateConversationState(conversationId, 'inicio');
+      console.log('❌ Proceso cancelado por el usuario');
     }
     
     // ================================
