@@ -24,12 +24,19 @@ app.post('/chatwoot-webhook', async (req, res) => {
       const userMessage = (content || '').trim().toLowerCase();
 
       // 👉 RESPUESTA "SI" → DISPARAR PLANTILLA
+      
       if (userMessage === 'si') {
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
           {
-            content_type: 'template',
-            content: 'seleccion_certificado_bachiller'
+            content_type: 'text',
+            content: '',
+            template_params: {
+              name: 'seleccion_certificado_bachiller',
+              category: 'UTILITY',
+              language: 'es',
+              components: []
+            }
           },
           {
             headers: {
@@ -38,9 +45,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
             }
           }
         );
-
-        console.log('✅ Plantilla enviada: seleccion_certificado_bachiller');
+      
+        console.log('✅ Plantilla WhatsApp enviada correctamente');
       }
+      
 
       // 👉 RESPUESTA "NO"
       else if (userMessage === 'no') {
