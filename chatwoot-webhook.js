@@ -20,6 +20,7 @@ const TEMPLATE_FLOW = {
   seleccion_certificado_bachiller: 'seleccion_ubicacion_desplazamiento',
   seleccion_ubicacion_desplazamiento: 'seleccion_familiares_empresa',
   seleccion_familiares_empresa: 'seleccion_vinculacion_previa',
+  seleccion_distancia_transporte: 'seleccion_distancia_transporte',
   seleccion_vinculacion_previa: 'fin'
 };
 
@@ -27,7 +28,8 @@ const TEMPLATE_NAMES = {
   seleccion_certificado_bachiller: 'certificado de bachiller',
   seleccion_ubicacion_desplazamiento: 'ubicación y desplazamiento',
   seleccion_familiares_empresa: 'familiares en la empresa',
-  seleccion_vinculacion_previa: 'vinculación previa'
+  seleccion_vinculacion_previa: 'vinculación previa',
+  seleccion_distancia_transporte: 'Distancia del lugar de trabajo'
 };
 
 // ================================
