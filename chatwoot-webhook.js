@@ -22,6 +22,66 @@ app.get('/', (req, res) => {
 });
 
 // ================================
+// DEBUG: Obtener Phone Number ID correcto
+// ================================
+app.get('/get-phone-id', async (req, res) => {
+  try {
+    // Primero obtener el Business Account ID
+    const businessResponse = await axios.get(
+      'https://graph.facebook.com/v18.0/me/businesses',
+      {
+        headers: {
+          'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`
+        }
+      }
+    );
+
+    const businessId = businessResponse.data.data[0]?.id;
+
+    if (!businessId) {
+      return res.json({ error: 'No business found', data: businessResponse.data });
+    }
+
+    // Luego obtener los números de WhatsApp
+    const wabaResponse = await axios.get(
+      `https://graph.facebook.com/v18.0/${businessId}/client_whatsapp_business_accounts`,
+      {
+        headers: {
+          'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`
+        }
+      }
+    );
+
+    const wabaId = wabaResponse.data.data[0]?.id;
+
+    if (!wabaId) {
+      return res.json({ error: 'No WABA found', businessId, data: wabaResponse.data });
+    }
+
+    // Finalmente obtener los phone numbers
+    const phoneResponse = await axios.get(
+      `https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`,
+      {
+        headers: {
+          'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`
+        }
+      }
+    );
+
+    res.json({
+      businessId,
+      wabaId,
+      phoneNumbers: phoneResponse.data
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: error.response?.data || error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// ================================
 // WEBHOOK CHATWOOT
 // ================================
 app.post('/chatwoot-webhook', async (req, res) => {
@@ -57,9 +117,31 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const userPhone = conversation.contact_inbox.source_id; // Número del usuario
 
     // ================================
+    // LÓGICA DE FLUJO CON PLANTILLAS
+    // ================================
+    
+    // Obtener el último mensaje del agente para determinar el contexto
+    const lastAgentMessage = conversation.messages?.[conversation.messages.length - 2];
+    const isAfterCertificadoBachiller = lastAgentMessage?.content?.includes('certificado de bachiller');
+
+    // ================================
     // RESPUESTA "SI" → ENVIAR PLANTILLA
     // ================================
     if (userMessage === 'si') {
+      let templateName = '';
+      let successMessage = '';
+
+      // Determinar qué plantilla enviar según el contexto
+      if (isAfterCertificadoBachiller) {
+        templateName = 'seleccion_ubicacion_desplazamiento';
+        successMessage = '📋 Plantilla de ubicación/desplazamiento enviada';
+      } else {
+        // Primera plantilla (por defecto)
+        templateName = 'seleccion_certificado_bachiller';
+        successMessage = '📋 Plantilla de certificado enviada';
+      }
+
+      console.log(`🎯 Contexto detectado, enviando plantilla: ${templateName}`);
       console.log('🔍 Detectado "Si", intentando enviar plantilla...');
       console.log('📞 Phone ID:', WHATSAPP_PHONE_ID);
       console.log('🔑 Token configurado:', WHATSAPP_API_TOKEN ? 'SÍ' : 'NO');
@@ -74,7 +156,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
             to: userPhone,
             type: "template",
             template: {
-              name: "seleccion_certificado_bachiller", // ✅ Corregido: sin _es_CO
+              name: templateName, // ✅ Nombre dinámico según contexto
               language: {
                 code: "es_CO"
               }
@@ -94,7 +176,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
           {
-            content: '📋 Plantilla de certificado enviada',
+            content: successMessage, // ✅ Mensaje dinámico
             private: true // Nota privada solo para agentes
           },
           {
