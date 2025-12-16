@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json());
 
 // ================================
-// VARIABLES DE ENTORNO (Railway)
+// VARIABLES DE ENTORNO
 // ================================
 const CHATWOOT_URL = process.env.CHATWOOT_URL;
 const API_KEY = process.env.API_KEY;
@@ -19,8 +19,8 @@ const TEMPLATE_FLOW = {
   inicio: 'seleccion_certificado_bachiller',
   seleccion_certificado_bachiller: 'seleccion_ubicacion_desplazamiento',
   seleccion_ubicacion_desplazamiento: 'seleccion_familiares_empresa',
-  seleccion_familiares_empresa: 'seleccion_vinculacion_previa',
-  seleccion_distancia_transporte: 'seleccion_distancia_transporte',
+  seleccion_familiares_empresa: 'seleccion_distancia_transporte',
+  seleccion_distancia_transporte: 'seleccion_vinculacion_previa',
   seleccion_vinculacion_previa: 'fin'
 };
 
@@ -28,8 +28,8 @@ const TEMPLATE_NAMES = {
   seleccion_certificado_bachiller: 'certificado de bachiller',
   seleccion_ubicacion_desplazamiento: 'ubicación y desplazamiento',
   seleccion_familiares_empresa: 'familiares en la empresa',
-  seleccion_vinculacion_previa: 'vinculación previa',
-  seleccion_distancia_transporte: 'Distancia del lugar de trabajo'
+  seleccion_distancia_transporte: 'distancia y transporte',
+  seleccion_vinculacion_previa: 'vinculación previa'
 };
 
 // ================================
@@ -46,9 +46,7 @@ async function getConversationState(conversationId) {
   try {
     const response = await axios.get(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
-      {
-        headers: { api_access_token: API_KEY }
-      }
+      { headers: { api_access_token: API_KEY } }
     );
     return response.data.custom_attributes?.template_state || 'inicio';
   } catch {
@@ -60,12 +58,7 @@ async function updateConversationState(conversationId, newState) {
   await axios.post(
     `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
     { custom_attributes: { template_state: newState } },
-    {
-      headers: {
-        api_access_token: API_KEY,
-        'Content-Type': 'application/json'
-      }
-    }
+    { headers: { api_access_token: API_KEY } }
   );
 }
 
@@ -83,7 +76,7 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
     },
     {
       headers: {
-        'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+        Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
         'Content-Type': 'application/json'
       }
     }
@@ -102,24 +95,26 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     if (additional_attributes?.template_params) {
-      return res.status(200).json({ ignored: 'template' });
+      return res.status(200).json({ ignored: 'template message' });
     }
 
     if (!content?.trim()) {
       return res.status(200).json({ ignored: 'empty' });
     }
 
-    const conversationId = conversation.id;
     const userMessage = content.trim().toLowerCase();
+    const conversationId = conversation.id;
     const userPhone = conversation.contact_inbox.source_id;
     const currentState = await getConversationState(conversationId);
 
-    // ================================
-    // RESPUESTA "SI"
-    // ================================
+    console.log(`📍 Estado: ${currentState} | Respuesta: ${userMessage}`);
+
+    // ============================
+    // RESPUESTA SI
+    // ============================
     if (userMessage === 'si') {
 
-      // ❌ familiares en empresa → TERMINA
+      // ❌ SOLO AQUÍ TERMINA
       if (currentState === 'seleccion_familiares_empresa') {
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
@@ -133,63 +128,41 @@ app.post('/chatwoot-webhook', async (req, res) => {
         return res.status(200).json({ ok: true });
       }
 
-      // ✅ flujo normal
-      const nextTemplate = TEMPLATE_FLOW[currentState];
+      // ✅ CONTINÚA EN TODOS LOS DEMÁS CASOS
+    }
 
-      if (nextTemplate === 'fin') {
+    // ============================
+    // RESPUESTA NO
+    // ============================
+    if (userMessage === 'no') {
+
+      // ❌ SOLO TERMINA SI NO ES UNA EXCEPCIÓN
+      if (currentState !== 'seleccion_familiares_empresa' &&
+          currentState !== 'seleccion_distancia_transporte' &&
+          currentState !== 'seleccion_vinculacion_previa') {
+
         await axios.post(
           `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
           {
-            content: '✅ Proceso de selección completado. Gracias por tu tiempo.'
+            content: 'Entendido, proceso de selección cancelado. Gracias por tu tiempo.'
           },
           { headers: { api_access_token: API_KEY } }
         );
+
         await updateConversationState(conversationId, 'inicio');
         return res.status(200).json({ ok: true });
       }
-
-      await sendWhatsAppTemplate(userPhone, nextTemplate);
-      await updateConversationState(conversationId, nextTemplate);
-
-      return res.status(200).json({ ok: true });
     }
 
-    // ================================
-    // RESPUESTA "NO"
-    // ================================
-    if (userMessage === 'no') {
+    // ============================
+    // AVANZAR FLUJO
+    // ============================
+    const nextTemplate = TEMPLATE_FLOW[currentState];
 
-      // ✅ familiares en empresa → CONTINÚA
-      // ✅ vinculación previa → CONTINÚA
-      if (
-        currentState === 'seleccion_familiares_empresa' ||
-        currentState === 'seleccion_vinculacion_previa'
-      ) {
-        const nextTemplate = TEMPLATE_FLOW[currentState];
-
-        if (nextTemplate === 'fin') {
-          await axios.post(
-            `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-            {
-              content: '✅ Proceso de selección completado. Gracias por tu tiempo.'
-            },
-            { headers: { api_access_token: API_KEY } }
-          );
-          await updateConversationState(conversationId, 'inicio');
-          return res.status(200).json({ ok: true });
-        }
-
-        await sendWhatsAppTemplate(userPhone, nextTemplate);
-        await updateConversationState(conversationId, nextTemplate);
-        return res.status(200).json({ ok: true });
-      }
-
-      // ❌ NO en otras plantillas → TERMINA
+    if (nextTemplate === 'fin') {
       await axios.post(
         `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        {
-          content: 'Entendido, proceso de selección cancelado. Gracias por tu tiempo.'
-        },
+        { content: '✅ Proceso de selección completado. Gracias por tu tiempo.' },
         { headers: { api_access_token: API_KEY } }
       );
 
@@ -197,13 +170,14 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.status(200).json({ ok: true });
     }
 
-    // ================================
-    // RESPUESTA INVÁLIDA
-    // ================================
+    await sendWhatsAppTemplate(userPhone, nextTemplate);
+    await updateConversationState(conversationId, nextTemplate);
+
     await axios.post(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
-        content: 'Por favor responde únicamente con "Si" o "No".'
+        content: `📋 Plantilla enviada: ${TEMPLATE_NAMES[nextTemplate] || nextTemplate}`,
+        private: true
       },
       { headers: { api_access_token: API_KEY } }
     );
@@ -211,7 +185,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     res.status(200).json({ ok: true });
 
   } catch (error) {
-    console.error('❌ ERROR:', error.message);
+    console.error('❌ ERROR:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
   }
 });
