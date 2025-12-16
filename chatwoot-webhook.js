@@ -62,7 +62,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
           content_type: 'text',
           content: '',
           template_params: {
-            name: 'seleccion_certificado_bachiller',
+            name: 'seleccion_certificado_bachiller - es_CO',
             category: 'UTILITY',
             language: 'es',
             components: []
