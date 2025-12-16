@@ -21,33 +21,54 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     if (event === 'message_created' && message_type === 'incoming') {
       const conversationId = conversation.id;
-
-      // 🔹 Normalizar mensaje
       const userMessage = (content || '').trim().toLowerCase();
 
-      let responseMessage = '';
-
+      // 👉 RESPUESTA "SI" → DISPARAR PLANTILLA
       if (userMessage === 'si') {
-        responseMessage = 'aceptado';
-      } else if (userMessage === 'no') {
-        responseMessage = 'rechazado';
-      } else {
-        responseMessage = 'Por favor seleccione una opción válida (Si, No)';
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content_type: 'template',
+            content: 'seleccion_certificado_bachiller'
+          },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        console.log('✅ Plantilla enviada: seleccion_certificado_bachiller');
       }
 
-      // 👉 Enviar respuesta a Chatwoot
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: responseMessage },
-        {
-          headers: {
-            api_access_token: API_KEY,
-            'Content-Type': 'application/json'
+      // 👉 RESPUESTA "NO"
+      else if (userMessage === 'no') {
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          { content: 'rechazado' },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
           }
-        }
-      );
+        );
+      }
 
-      console.log(`✅ Respuesta enviada: "${responseMessage}"`);
+      // 👉 RESPUESTA INVÁLIDA
+      else {
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          { content: 'Por favor seleccione una opción válida (Si, No)' },
+          {
+            headers: {
+              api_access_token: API_KEY,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+      }
     }
 
     res.status(200).json({ ok: true });
@@ -57,7 +78,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on ${PORT}`);
 });
+
