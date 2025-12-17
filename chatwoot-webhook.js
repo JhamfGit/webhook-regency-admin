@@ -114,7 +114,7 @@ async function sendWhatsAppList(userPhone) {
           text: "¿Cuál es el tiempo aproximado de traslado entre su residencia y el lugar de trabajo?"
         },
         action: {
-          button: "Ver todas las opciones",
+          button: "Ver opciones",
           sections: [
             {
               title: "Opciones",
