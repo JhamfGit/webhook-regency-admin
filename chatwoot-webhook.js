@@ -13,14 +13,15 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 // ================================
-// FLUJO
+// FLUJO DE ESTADOS
 // ================================
 const TEMPLATE_FLOW = {
   inicio: 'seleccion_certificado_bachiller',
   seleccion_certificado_bachiller: 'seleccion_ubicacion_desplazamiento',
   seleccion_ubicacion_desplazamiento: 'seleccion_familiares_empresa',
   seleccion_familiares_empresa: 'seleccion_distancia_transporte',
-  seleccion_distancia_transporte: 'seleccion_vinculacion_previa',
+  seleccion_distancia_transporte: 'seleccion_medio_transporte',
+  seleccion_medio_transporte: 'seleccion_vinculacion_previa',
   seleccion_vinculacion_previa: 'fin'
 };
 
@@ -29,18 +30,19 @@ const TEMPLATE_NAMES = {
   seleccion_ubicacion_desplazamiento: 'Ubicación y desplazamiento',
   seleccion_familiares_empresa: 'Familiares en la empresa',
   seleccion_distancia_transporte: 'Distancia al trabajo',
+  seleccion_medio_transporte: 'Medio de transporte',
   seleccion_vinculacion_previa: 'Vinculación previa'
 };
 
 // ================================
 // HEALTH CHECK
 // ================================
-app.get('/', (req, res) => {
+app.get('/', (_, res) => {
   res.status(200).send('OK');
 });
 
 // ================================
-// FUNCIONES AUXILIARES
+// FUNCIONES AUXILIARES CHATWOOT
 // ================================
 async function getConversationState(conversationId) {
   try {
@@ -95,9 +97,9 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
 }
 
 // ================================
-// WHATSAPP - LISTA INTERACTIVA
+// WHATSAPP - LISTA DISTANCIA
 // ================================
-async function sendWhatsAppList(userPhone) {
+async function sendWhatsAppDistancia(userPhone) {
   return axios.post(
     `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
     {
@@ -106,10 +108,7 @@ async function sendWhatsAppList(userPhone) {
       type: "interactive",
       interactive: {
         type: "list",
-        header: {
-          type: "text",
-          text: "Distancia al trabajo"
-        },
+        header: { type: "text", text: "Distancia al trabajo" },
         body: {
           text: "¿Cuál es el tiempo aproximado de traslado entre su residencia y el lugar de trabajo?"
         },
@@ -123,6 +122,48 @@ async function sendWhatsAppList(userPhone) {
                 { id: "15_30", title: "15 a 30 minutos" },
                 { id: "30_60", title: "30 minutos a 1 hora" },
                 { id: "mas_60", title: "Más de 1 hora" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+// ================================
+// WHATSAPP - LISTA MEDIO TRANSPORTE
+// ================================
+async function sendWhatsAppMedioTransporte(userPhone) {
+  return axios.post(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to: userPhone,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        header: { type: "text", text: "Medio de transporte" },
+        body: {
+          text: "¿Qué medio de transporte utiliza para desplazarse al lugar de trabajo?"
+        },
+        action: {
+          button: "Ver opciones",
+          sections: [
+            {
+              title: "Opciones",
+              rows: [
+                { id: "moto", title: "Moto" },
+                { id: "carro", title: "Carro" },
+                { id: "publico", title: "Transporte público" },
+                { id: "bicicleta", title: "Bicicleta" },
+                { id: "pie", title: "A pie" }
               ]
             }
           ]
@@ -160,29 +201,27 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     console.log(`📍 Estado: ${currentState} | Respuesta: ${userMessage}`);
 
-    // ============================
-    // VALIDACIÓN SI / NO
-    // ============================
+    // ❌ Corte por familiares
     if (userMessage === 'si' && currentState === 'seleccion_familiares_empresa') {
       await sendChatwootMessage(
         conversationId,
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
       await updateConversationState(conversationId, 'inicio');
-      return res.status(200).json({ ok: true });
+      return res.json({ ok: true });
     }
 
-    if (userMessage === 'no' &&
-        currentState !== 'seleccion_familiares_empresa' &&
-        currentState !== 'seleccion_distancia_transporte' &&
-        currentState !== 'seleccion_vinculacion_previa') {
-
+    // ❌ Cancelación general
+    if (
+      userMessage === 'no' &&
+      !['seleccion_familiares_empresa', 'seleccion_distancia_transporte', 'seleccion_medio_transporte', 'seleccion_vinculacion_previa'].includes(currentState)
+    ) {
       await sendChatwootMessage(
         conversationId,
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'inicio');
-      return res.status(200).json({ ok: true });
+      return res.json({ ok: true });
     }
 
     // ============================
@@ -196,24 +235,26 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '✅ Proceso de selección completado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'inicio');
-      return res.status(200).json({ ok: true });
+      return res.json({ ok: true });
     }
 
-    // 👉 DISTANCIA = LISTA
     if (nextStep === 'seleccion_distancia_transporte') {
-      await sendWhatsAppList(userPhone);
+      await sendWhatsAppDistancia(userPhone);
+    } else if (nextStep === 'seleccion_medio_transporte') {
+      await sendWhatsAppMedioTransporte(userPhone);
     } else {
       await sendWhatsAppTemplate(userPhone, nextStep);
     }
 
     await updateConversationState(conversationId, nextStep);
+
     await sendChatwootMessage(
       conversationId,
-      `📋 Mensaje enviado: ${TEMPLATE_NAMES[nextStep] || nextStep}`,
+      `📋 Mensaje enviado: ${TEMPLATE_NAMES[nextStep]}`,
       true
     );
 
-    res.status(200).json({ ok: true });
+    res.json({ ok: true });
 
   } catch (error) {
     console.error('❌ ERROR:', error.response?.data || error.message);
