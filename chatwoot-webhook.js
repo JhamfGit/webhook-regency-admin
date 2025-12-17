@@ -40,10 +40,16 @@ const FLOW_CONFIG = {
     stopOnYes: true
   },
   seleccion_distancia_transporte: {
+    next: 'medio_transporte',
+    displayName: 'Distancia al trabajo',
+    type: 'informative', // Solo informativa, acepta cualquier respuesta
+    autoAdvance: true
+  },
+  medio_transporte: {
     next: 'seleccion_vinculacion_previa',
-    displayName: 'Distancia y transporte',
-    type: 'flow', // Flow interactivo, no requiere si/no
-    autoAdvance: true // Avanza automáticamente después de completar
+    displayName: 'Medio de transporte',
+    type: 'informative', // Solo informativa, acepta cualquier respuesta
+    autoAdvance: true
   },
   seleccion_vinculacion_previa: {
     next: 'fin',
@@ -171,15 +177,15 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     // ============================
-    // MANEJO DE FLOWS INTERACTIVOS
+    // MANEJO DE PREGUNTAS INFORMATIVAS
     // ============================
-    if (currentConfig.type === 'flow') {
-      console.log(`📋 Flow interactivo completado en: ${currentState}`);
+    if (currentConfig.type === 'informative') {
+      console.log(`ℹ️ Pregunta informativa completada: ${currentState}`);
       
-      // Guardar la información del flow (opcional)
+      // Guardar la respuesta en Chatwoot
       await sendChatwootMessage(
         conversationId,
-        `ℹ️ Información de distancia/transporte recibida: "${content}"`,
+        `📝 ${currentConfig.displayName}: "${content}"`,
         true
       );
 
