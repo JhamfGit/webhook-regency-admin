@@ -234,34 +234,20 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
 
     // ============================
-    // INICIAR FLUJO SI NO HAY ESTADO ACTIVO
+    // VERIFICAR SI HAY UN FLUJO ACTIVO
     // ============================
     if (!currentState) {
-      // Palabras clave para iniciar el flujo
-      const startKeywords = ['hola', 'inicio', 'iniciar', 'comenzar', 'empezar', 'si', 'quiero aplicar'];
-      
-      if (startKeywords.some(keyword => userMessage.includes(keyword))) {
-        console.log('🚀 Iniciando nuevo flujo...');
-        
-        try {
-          await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
-          await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-          
-          await sendChatwootMessage(
-            conversationId,
-            '✅ Flujo iniciado: Certificado de bachiller',
-            true
-          );
-          
-          return res.json({ ok: true, started: true });
-        } catch (error) {
-          console.error('❌ Error iniciando flujo:', error.message);
-          return res.status(500).json({ error: 'failed to start flow' });
-        }
-      }
-      
       console.log('⏸️ No hay flujo activo. Mensaje ignorado.');
       return res.status(200).json({ ignored: 'no active flow' });
+    }
+
+    // ============================
+    // IGNORAR MENSAJES SI EL FLUJO YA TERMINÓ
+    // ============================
+    const finalStates = ['completado', 'rechazado', 'cancelado', 'error'];
+    if (finalStates.includes(currentState)) {
+      console.log(`🔒 Flujo finalizado con estado: ${currentState}. Mensaje ignorado.`);
+      return res.status(200).json({ ignored: 'flow already finished' });
     }
 
     // ============================
@@ -327,7 +313,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (nextStep === 'fin') {
       await sendChatwootMessage(
         conversationId,
-        'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
+        '✅ Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
       return res.json({ ok: true, completed: true });
