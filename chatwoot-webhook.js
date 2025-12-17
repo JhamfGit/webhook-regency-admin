@@ -13,50 +13,23 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 // ================================
-// CONFIGURACIÓN DEL FLUJO
+// FLUJO DE PLANTILLAS
 // ================================
-const FLOW_CONFIG = {
-  inicio: {
-    next: 'seleccion_certificado_bachiller',
-    displayName: 'Inicio',
-    type: 'yes_no'
-  },
-  seleccion_certificado_bachiller: {
-    next: 'seleccion_ubicacion_desplazamiento',
-    displayName: 'Certificado de bachiller',
-    type: 'yes_no',
-    stopOnNo: true
-  },
-  seleccion_ubicacion_desplazamiento: {
-    next: 'seleccion_familiares_empresa',
-    displayName: 'Ubicación y desplazamiento',
-    type: 'yes_no',
-    stopOnNo: true
-  },
-  seleccion_familiares_empresa: {
-    next: 'seleccion_distancia_transporte',
-    displayName: 'Familiares en la empresa',
-    type: 'yes_no',
-    stopOnYes: true
-  },
-  seleccion_distancia_transporte: {
-    next: 'medio_transporte',
-    displayName: 'Distancia al trabajo',
-    type: 'informative', // Solo informativa, acepta cualquier respuesta
-    autoAdvance: true
-  },
-  medio_transporte: {
-    next: 'seleccion_vinculacion_previa',
-    displayName: 'Medio de transporte',
-    type: 'informative', // Solo informativa, acepta cualquier respuesta
-    autoAdvance: true
-  },
-  seleccion_vinculacion_previa: {
-    next: 'fin',
-    displayName: 'Vinculación previa',
-    type: 'yes_no',
-    stopOnNo: false
-  }
+const TEMPLATE_FLOW = {
+  inicio: 'seleccion_certificado_bachiller',
+  seleccion_certificado_bachiller: 'seleccion_ubicacion_desplazamiento',
+  seleccion_ubicacion_desplazamiento: 'seleccion_familiares_empresa',
+  seleccion_familiares_empresa: 'seleccion_distancia_transporte',
+  seleccion_distancia_transporte: 'seleccion_vinculacion_previa',
+  seleccion_vinculacion_previa: 'fin'
+};
+
+const TEMPLATE_NAMES = {
+  seleccion_certificado_bachiller: 'certificado de bachiller',
+  seleccion_ubicacion_desplazamiento: 'ubicación y desplazamiento',
+  seleccion_familiares_empresa: 'familiares en la empresa',
+  seleccion_distancia_transporte: 'distancia y transporte',
+  seleccion_vinculacion_previa: 'vinculación previa'
 };
 
 // ================================
@@ -76,76 +49,38 @@ async function getConversationState(conversationId) {
       { headers: { api_access_token: API_KEY } }
     );
     return response.data.custom_attributes?.template_state || 'inicio';
-  } catch (error) {
-    console.error('⚠️ Error obteniendo estado:', error.message);
+  } catch {
     return 'inicio';
   }
 }
 
 async function updateConversationState(conversationId, newState) {
-  try {
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
-      { custom_attributes: { template_state: newState } },
-      { headers: { api_access_token: API_KEY } }
-    );
-  } catch (error) {
-    console.error('⚠️ Error actualizando estado:', error.message);
-  }
-}
-
-async function sendChatwootMessage(conversationId, content, isPrivate = false) {
-  try {
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-      { content, private: isPrivate },
-      { headers: { api_access_token: API_KEY } }
-    );
-  } catch (error) {
-    console.error('⚠️ Error enviando mensaje a Chatwoot:', error.message);
-  }
+  await axios.post(
+    `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
+    { custom_attributes: { template_state: newState } },
+    { headers: { api_access_token: API_KEY } }
+  );
 }
 
 async function sendWhatsAppTemplate(userPhone, templateName) {
-  try {
-    const response = await axios.post(
-      `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: userPhone,
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: "es_CO" },
-          components: [
-            {
-              type: "button",
-              sub_type: "list",
-              index: "0"
-            }
-          ]
-        }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
+  return axios.post(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to: userPhone,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: "es_CO" }
       }
-    );
-
-    return { success: true, data: response.data };
-  } catch (error) {
-    const errorDetail = error.response?.data || error.message;
-    console.error(`❌ Error enviando plantilla "${templateName}":`, errorDetail);
-    return { success: false, error: errorDetail };
-  }
-}
-
-
-async function endFlow(conversationId, message) {
-  await sendChatwootMessage(conversationId, message);
-  await updateConversationState(conversationId, 'inicio');
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 }
 
 // ================================
@@ -155,19 +90,16 @@ app.post('/chatwoot-webhook', async (req, res) => {
   try {
     const { event, message_type, conversation, content, additional_attributes } = req.body;
 
-    // Filtrar mensajes no relevantes
     if (event !== 'message_created' || message_type !== 'incoming') {
-      return res.status(200).json({ ignored: 'not incoming message' });
+      return res.status(200).json({ ignored: true });
     }
 
-    // Ignorar SOLO mensajes salientes automáticos
-    if (message_type !== 'incoming') {
-      return res.status(200).json({ ignored: 'not incoming' });
+    if (additional_attributes?.template_params) {
+      return res.status(200).json({ ignored: 'template message' });
     }
-
 
     if (!content?.trim()) {
-      return res.status(200).json({ ignored: 'empty message' });
+      return res.status(200).json({ ignored: 'empty' });
     }
 
     const userMessage = content.trim().toLowerCase();
@@ -175,146 +107,85 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const userPhone = conversation.contact_inbox.source_id;
     const currentState = await getConversationState(conversationId);
 
-    console.log(`📍 Estado: ${currentState} | Respuesta: "${userMessage}"`);
-
-    // Obtener configuración del estado actual
-    const currentConfig = FLOW_CONFIG[currentState];
-    
-    if (!currentConfig) {
-      console.error(`❌ Estado desconocido: ${currentState}`);
-      await endFlow(conversationId, '❌ Error en el flujo. Por favor inicia nuevamente.');
-      return res.status(200).json({ ok: true, error: 'unknown state' });
-    }
+    console.log(`📍 Estado: ${currentState} | Respuesta: ${userMessage}`);
 
     // ============================
-    // MANEJO DE PREGUNTAS INFORMATIVAS
+    // RESPUESTA SI
     // ============================
-    if (currentConfig.type === 'informative') {
-      console.log(`ℹ️ Pregunta informativa completada: ${currentState}`);
-      
-      // Guardar la respuesta en Chatwoot
-      await sendChatwootMessage(
-        conversationId,
-        `📝 ${currentConfig.displayName}: "${content}"`,
-        true
-      );
+    if (userMessage === 'si') {
 
-      // Avanzar automáticamente al siguiente paso
-      const nextStep = currentConfig.next;
-
-      if (nextStep === 'fin') {
-        await endFlow(
-          conversationId,
-          '✅ ¡Proceso de selección completado exitosamente! Gracias por tu tiempo. Nos pondremos en contacto contigo pronto.'
+      // ❌ SOLO AQUÍ TERMINA
+      if (currentState === 'seleccion_familiares_empresa') {
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content: 'Gracias por tu respuesta. Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
+          },
+          { headers: { api_access_token: API_KEY } }
         );
-        return res.status(200).json({ ok: true, completed: true });
-      }
 
-      // Enviar siguiente plantilla
-      const templateResult = await sendWhatsAppTemplate(userPhone, nextStep);
-
-      if (!templateResult.success) {
-        await sendChatwootMessage(
-          conversationId,
-          `⚠️ Error al enviar plantilla "${FLOW_CONFIG[nextStep].displayName}".`,
-          true
-        );
-        await sendChatwootMessage(
-          conversationId,
-          '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.'
-        );
         await updateConversationState(conversationId, 'inicio');
-        return res.status(200).json({ ok: false, error: 'template send failed' });
+        return res.status(200).json({ ok: true });
       }
 
-      await updateConversationState(conversationId, nextStep);
-      await sendChatwootMessage(
-        conversationId,
-        `✅ Plantilla enviada: ${FLOW_CONFIG[nextStep].displayName}`,
-        true
-      );
-
-      return res.status(200).json({ ok: true, nextStep });
+      // ✅ CONTINÚA EN TODOS LOS DEMÁS CASOS
     }
 
     // ============================
-    // VALIDACIÓN PARA RESPUESTAS SI/NO
+    // RESPUESTA NO
     // ============================
-    if (currentConfig.type === 'yes_no') {
-      if (userMessage !== 'si' && userMessage !== 'no') {
-        await sendChatwootMessage(
-          conversationId,
-          '⚠️ Por favor responde únicamente "si" o "no"'
+    if (userMessage === 'no') {
+
+      // ❌ SOLO TERMINA SI NO ES UNA EXCEPCIÓN
+      if (currentState !== 'seleccion_familiares_empresa' &&
+          currentState !== 'seleccion_distancia_transporte' &&
+          currentState !== 'seleccion_vinculacion_previa') {
+
+        await axios.post(
+          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+          {
+            content: 'Entendido, proceso de selección cancelado. Gracias por tu tiempo.'
+          },
+          { headers: { api_access_token: API_KEY } }
         );
-        return res.status(200).json({ ok: true, message: 'invalid response' });
-      }
 
-      // ============================
-      // LÓGICA DE DECISIÓN SI/NO
-      // ============================
-      let shouldStop = false;
-      let stopMessage = '';
-
-      if (userMessage === 'si' && currentConfig.stopOnYes) {
-        shouldStop = true;
-        stopMessage = '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso. Gracias por tu tiempo.';
-      }
-
-      if (userMessage === 'no' && currentConfig.stopOnNo) {
-        shouldStop = true;
-        stopMessage = '❌ Entendido, el proceso de selección ha sido cancelado. Gracias por tu tiempo.';
-      }
-
-      if (shouldStop) {
-        await endFlow(conversationId, stopMessage);
-        return res.status(200).json({ ok: true, stopped: true });
+        await updateConversationState(conversationId, 'inicio');
+        return res.status(200).json({ ok: true });
       }
     }
 
     // ============================
-    // AVANZAR AL SIGUIENTE PASO
+    // AVANZAR FLUJO
     // ============================
-    const nextStep = currentConfig.next;
+    const nextTemplate = TEMPLATE_FLOW[currentState];
 
-    if (nextStep === 'fin') {
-      await endFlow(
-        conversationId,
-        '✅ ¡Proceso de selección completado exitosamente! Gracias por tu tiempo. Nos pondremos en contacto contigo pronto.'
+    if (nextTemplate === 'fin') {
+      await axios.post(
+        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+        { content: '✅ Proceso de selección completado. Gracias por tu tiempo.' },
+        { headers: { api_access_token: API_KEY } }
       );
-      return res.status(200).json({ ok: true, completed: true });
-    }
 
-    // Enviar siguiente plantilla
-    const templateResult = await sendWhatsAppTemplate(userPhone, nextStep);
-
-    if (!templateResult.success) {
-      await sendChatwootMessage(
-        conversationId,
-        `⚠️ Error al enviar plantilla "${FLOW_CONFIG[nextStep].displayName}". Verifica la configuración en Meta Business.`,
-        true
-      );
-      
-      await sendChatwootMessage(
-        conversationId,
-        '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.'
-      );
-      
       await updateConversationState(conversationId, 'inicio');
-      return res.status(200).json({ ok: false, error: 'template send failed' });
+      return res.status(200).json({ ok: true });
     }
 
-    // Actualizar estado y notificar
-    await updateConversationState(conversationId, nextStep);
-    await sendChatwootMessage(
-      conversationId,
-      `✅ Plantilla enviada: ${FLOW_CONFIG[nextStep].displayName}`,
-      true
+    await sendWhatsAppTemplate(userPhone, nextTemplate);
+    await updateConversationState(conversationId, nextTemplate);
+
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+      {
+        content: `📋 Plantilla enviada: ${TEMPLATE_NAMES[nextTemplate] || nextTemplate}`,
+        private: true
+      },
+      { headers: { api_access_token: API_KEY } }
     );
 
-    res.status(200).json({ ok: true, nextStep });
+    res.status(200).json({ ok: true });
 
   } catch (error) {
-    console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
+    console.error('❌ ERROR:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
   }
 });
@@ -324,6 +195,5 @@ app.post('/chatwoot-webhook', async (req, res) => {
 // ================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Webhook listening on port ${PORT}`);
-  console.log(`📋 Flujo configurado con ${Object.keys(FLOW_CONFIG).length} estados`);
+  console.log(`🚀 Webhook listening on ${PORT}`);
 });
