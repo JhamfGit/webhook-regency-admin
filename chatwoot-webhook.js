@@ -34,6 +34,12 @@ const TEMPLATE_NAMES = {
   seleccion_vinculacion_previa: 'Vinculación previa'
 };
 
+// Opciones válidas para cada lista interactiva
+const VALID_RESPONSES = {
+  seleccion_distancia_transporte: ['menos_15', '15_30', '30_60', 'mas_60', 'menos de 15 minutos', '15 a 30 minutos', '30 minutos a 1 hora', 'más de 1 hora'],
+  seleccion_medio_transporte: ['moto', 'carro', 'publico', 'transporte público', 'bicicleta', 'pie', 'a pie']
+};
+
 // ================================
 // HEALTH CHECK
 // ================================
@@ -50,9 +56,9 @@ async function getConversationState(conversationId) {
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
       { headers: { api_access_token: API_KEY } }
     );
-    return res.data.custom_attributes?.template_state || 'inicio';
+    return res.data.custom_attributes?.template_state || null;
   } catch {
-    return 'inicio';
+    return null;
   }
 }
 
@@ -180,18 +186,44 @@ async function sendWhatsAppMedioTransporte(userPhone) {
 }
 
 // ================================
+// VALIDACIÓN DE RESPUESTAS
+// ================================
+function isValidResponse(state, message) {
+  // Para estados con listas interactivas, validar opciones
+  if (VALID_RESPONSES[state]) {
+    return VALID_RESPONSES[state].some(option => 
+      message.toLowerCase().includes(option.toLowerCase())
+    );
+  }
+  
+  // Para estados de si/no
+  if (['seleccion_certificado_bachiller', 'seleccion_ubicacion_desplazamiento', 
+       'seleccion_familiares_empresa', 'seleccion_vinculacion_previa'].includes(state)) {
+    return message === 'si' || message === 'no';
+  }
+  
+  return false;
+}
+
+// ================================
 // WEBHOOK CHATWOOT
 // ================================
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
-    const { event, message_type, conversation, content } = req.body;
+    const { event, message_type, conversation, content, additional_attributes } = req.body;
 
     if (event !== 'message_created' || message_type !== 'incoming') {
-      return res.status(200).json({ ignored: true });
+      return res.status(200).json({ ignored: 'not incoming message' });
+    }
+
+    // Ignorar mensajes de listas interactivas (vienen con button_reply)
+    if (additional_attributes?.button_reply || additional_attributes?.list_reply) {
+      console.log('📱 Respuesta de lista interactiva detectada');
+      // Estos mensajes se procesarán normalmente abajo
     }
 
     if (!content?.trim()) {
-      return res.status(200).json({ ignored: 'empty' });
+      return res.status(200).json({ ignored: 'empty message' });
     }
 
     const userMessage = content.trim().toLowerCase();
@@ -199,7 +231,46 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const userPhone = conversation.contact_inbox.source_id;
     const currentState = await getConversationState(conversationId);
 
-    console.log(`📍 Estado: ${currentState} | Respuesta: ${userMessage}`);
+    console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
+
+    // ============================
+    // VERIFICAR SI HAY UN FLUJO ACTIVO
+    // ============================
+    if (!currentState) {
+      console.log('⏸️ No hay flujo activo. Mensaje ignorado.');
+      return res.status(200).json({ ignored: 'no active flow' });
+    }
+
+    // ============================
+    // VALIDAR RESPUESTA SEGÚN ESTADO
+    // ============================
+    if (!isValidResponse(currentState, userMessage)) {
+      console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
+      
+      // Mensaje de ayuda según el tipo de pregunta
+      let helpMessage = '';
+      if (VALID_RESPONSES[currentState]) {
+        helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
+      } else {
+        helpMessage = '⚠️ Por favor responde únicamente "si" o "no".';
+      }
+      
+      await sendChatwootMessage(conversationId, helpMessage);
+      return res.status(200).json({ ok: true, message: 'invalid response, help sent' });
+    }
+
+    // Guardar respuestas informativas en Chatwoot
+    if (currentState === 'seleccion_distancia_transporte' || currentState === 'seleccion_medio_transporte') {
+      await sendChatwootMessage(
+        conversationId,
+        `📝 ${TEMPLATE_NAMES[currentState]}: ${content}`,
+        true
+      );
+    }
+
+    // ============================
+    // LÓGICA DE DECISIÓN
+    // ============================
 
     // ❌ Corte por familiares
     if (userMessage === 'si' && currentState === 'seleccion_familiares_empresa') {
@@ -207,21 +278,22 @@ app.post('/chatwoot-webhook', async (req, res) => {
         conversationId,
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
-      await updateConversationState(conversationId, 'inicio');
-      return res.json({ ok: true });
+      await updateConversationState(conversationId, 'rechazado');
+      return res.json({ ok: true, stopped: true });
     }
 
-    // ❌ Cancelación general
+    // ❌ Cancelación general (solo para preguntas si/no críticas)
     if (
       userMessage === 'no' &&
-      !['seleccion_familiares_empresa', 'seleccion_distancia_transporte', 'seleccion_medio_transporte', 'seleccion_vinculacion_previa'].includes(currentState)
+      !['seleccion_familiares_empresa', 'seleccion_distancia_transporte', 
+        'seleccion_medio_transporte', 'seleccion_vinculacion_previa'].includes(currentState)
     ) {
       await sendChatwootMessage(
         conversationId,
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
-      await updateConversationState(conversationId, 'inicio');
-      return res.json({ ok: true });
+      await updateConversationState(conversationId, 'cancelado');
+      return res.json({ ok: true, stopped: true });
     }
 
     // ============================
@@ -232,32 +304,47 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (nextStep === 'fin') {
       await sendChatwootMessage(
         conversationId,
-        'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
+        '✅ Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
-      await updateConversationState(conversationId, 'inicio');
-      return res.json({ ok: true });
+      await updateConversationState(conversationId, 'completado');
+      return res.json({ ok: true, completed: true });
     }
 
-    if (nextStep === 'seleccion_distancia_transporte') {
-      await sendWhatsAppDistancia(userPhone);
-    } else if (nextStep === 'seleccion_medio_transporte') {
-      await sendWhatsAppMedioTransporte(userPhone);
-    } else {
-      await sendWhatsAppTemplate(userPhone, nextStep);
+    // Enviar siguiente mensaje
+    try {
+      if (nextStep === 'seleccion_distancia_transporte') {
+        await sendWhatsAppDistancia(userPhone);
+      } else if (nextStep === 'seleccion_medio_transporte') {
+        await sendWhatsAppMedioTransporte(userPhone);
+      } else {
+        await sendWhatsAppTemplate(userPhone, nextStep);
+      }
+
+      await updateConversationState(conversationId, nextStep);
+
+      await sendChatwootMessage(
+        conversationId,
+        `✅ Mensaje enviado: ${TEMPLATE_NAMES[nextStep]}`,
+        true
+      );
+
+      res.json({ ok: true, nextStep });
+
+    } catch (error) {
+      console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
+      
+      await sendChatwootMessage(
+        conversationId,
+        '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
+        false
+      );
+      
+      await updateConversationState(conversationId, 'error');
+      res.status(500).json({ error: 'send message failed' });
     }
-
-    await updateConversationState(conversationId, nextStep);
-
-    await sendChatwootMessage(
-      conversationId,
-      `📋 Mensaje enviado: ${TEMPLATE_NAMES[nextStep]}`,
-      true
-    );
-
-    res.json({ ok: true });
 
   } catch (error) {
-    console.error('❌ ERROR:', error.response?.data || error.message);
+    console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
   }
 });
@@ -267,5 +354,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
 // ================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Webhook listening on ${PORT}`);
+  console.log(`🚀 Webhook listening on port ${PORT}`);
+  console.log(`📋 Flujo configurado con ${Object.keys(TEMPLATE_FLOW).length} estados`);
 });
