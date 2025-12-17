@@ -18,32 +18,38 @@ const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 const FLOW_CONFIG = {
   inicio: {
     next: 'seleccion_certificado_bachiller',
-    displayName: 'Inicio'
+    displayName: 'Inicio',
+    type: 'yes_no'
   },
   seleccion_certificado_bachiller: {
     next: 'seleccion_ubicacion_desplazamiento',
     displayName: 'Certificado de bachiller',
-    stopOnNo: true // Detiene el flujo si responde "no"
+    type: 'yes_no',
+    stopOnNo: true
   },
   seleccion_ubicacion_desplazamiento: {
     next: 'seleccion_familiares_empresa',
     displayName: 'Ubicación y desplazamiento',
+    type: 'yes_no',
     stopOnNo: true
   },
   seleccion_familiares_empresa: {
     next: 'seleccion_distancia_transporte',
     displayName: 'Familiares en la empresa',
-    stopOnYes: true // Detiene el flujo si responde "si"
+    type: 'yes_no',
+    stopOnYes: true
   },
   seleccion_distancia_transporte: {
     next: 'seleccion_vinculacion_previa',
     displayName: 'Distancia y transporte',
-    stopOnNo: false // Continúa aunque responda "no"
+    type: 'flow', // Flow interactivo, no requiere si/no
+    autoAdvance: true // Avanza automáticamente después de completar
   },
   seleccion_vinculacion_previa: {
     next: 'fin',
     displayName: 'Vinculación previa',
-    stopOnNo: false // Continúa aunque responda "no"
+    type: 'yes_no',
+    stopOnNo: false
   }
 };
 
@@ -139,6 +145,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.status(200).json({ ignored: 'not incoming message' });
     }
 
+    // Ignorar mensajes de plantillas (templates)
     if (additional_attributes?.template_params) {
       return res.status(200).json({ ignored: 'template message' });
     }
@@ -154,15 +161,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     console.log(`📍 Estado: ${currentState} | Respuesta: "${userMessage}"`);
 
-    // Validar respuesta
-    if (userMessage !== 'si' && userMessage !== 'no') {
-      await sendChatwootMessage(
-        conversationId,
-        '⚠️ Por favor responde únicamente "si" o "no"'
-      );
-      return res.status(200).json({ ok: true, message: 'invalid response' });
-    }
-
     // Obtener configuración del estado actual
     const currentConfig = FLOW_CONFIG[currentState];
     
@@ -173,24 +171,88 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     // ============================
-    // LÓGICA DE DECISIÓN
+    // MANEJO DE FLOWS INTERACTIVOS
     // ============================
-    let shouldStop = false;
-    let stopMessage = '';
+    if (currentConfig.type === 'flow') {
+      console.log(`📋 Flow interactivo completado en: ${currentState}`);
+      
+      // Guardar la información del flow (opcional)
+      await sendChatwootMessage(
+        conversationId,
+        `ℹ️ Información de distancia/transporte recibida: "${content}"`,
+        true
+      );
 
-    if (userMessage === 'si' && currentConfig.stopOnYes) {
-      shouldStop = true;
-      stopMessage = '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso. Gracias por tu tiempo.';
+      // Avanzar automáticamente al siguiente paso
+      const nextStep = currentConfig.next;
+
+      if (nextStep === 'fin') {
+        await endFlow(
+          conversationId,
+          '✅ ¡Proceso de selección completado exitosamente! Gracias por tu tiempo. Nos pondremos en contacto contigo pronto.'
+        );
+        return res.status(200).json({ ok: true, completed: true });
+      }
+
+      // Enviar siguiente plantilla
+      const templateResult = await sendWhatsAppTemplate(userPhone, nextStep);
+
+      if (!templateResult.success) {
+        await sendChatwootMessage(
+          conversationId,
+          `⚠️ Error al enviar plantilla "${FLOW_CONFIG[nextStep].displayName}".`,
+          true
+        );
+        await sendChatwootMessage(
+          conversationId,
+          '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.'
+        );
+        await updateConversationState(conversationId, 'inicio');
+        return res.status(200).json({ ok: false, error: 'template send failed' });
+      }
+
+      await updateConversationState(conversationId, nextStep);
+      await sendChatwootMessage(
+        conversationId,
+        `✅ Plantilla enviada: ${FLOW_CONFIG[nextStep].displayName}`,
+        true
+      );
+
+      return res.status(200).json({ ok: true, nextStep });
     }
 
-    if (userMessage === 'no' && currentConfig.stopOnNo) {
-      shouldStop = true;
-      stopMessage = '❌ Entendido, el proceso de selección ha sido cancelado. Gracias por tu tiempo.';
-    }
+    // ============================
+    // VALIDACIÓN PARA RESPUESTAS SI/NO
+    // ============================
+    if (currentConfig.type === 'yes_no') {
+      if (userMessage !== 'si' && userMessage !== 'no') {
+        await sendChatwootMessage(
+          conversationId,
+          '⚠️ Por favor responde únicamente "si" o "no"'
+        );
+        return res.status(200).json({ ok: true, message: 'invalid response' });
+      }
 
-    if (shouldStop) {
-      await endFlow(conversationId, stopMessage);
-      return res.status(200).json({ ok: true, stopped: true });
+      // ============================
+      // LÓGICA DE DECISIÓN SI/NO
+      // ============================
+      let shouldStop = false;
+      let stopMessage = '';
+
+      if (userMessage === 'si' && currentConfig.stopOnYes) {
+        shouldStop = true;
+        stopMessage = '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso. Gracias por tu tiempo.';
+      }
+
+      if (userMessage === 'no' && currentConfig.stopOnNo) {
+        shouldStop = true;
+        stopMessage = '❌ Entendido, el proceso de selección ha sido cancelado. Gracias por tu tiempo.';
+      }
+
+      if (shouldStop) {
+        await endFlow(conversationId, stopMessage);
+        return res.status(200).json({ ok: true, stopped: true });
+      }
     }
 
     // ============================
@@ -210,7 +272,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const templateResult = await sendWhatsAppTemplate(userPhone, nextStep);
 
     if (!templateResult.success) {
-      // Si falla el envío de la plantilla
       await sendChatwootMessage(
         conversationId,
         `⚠️ Error al enviar plantilla "${FLOW_CONFIG[nextStep].displayName}". Verifica la configuración en Meta Business.`,
