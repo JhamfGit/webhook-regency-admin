@@ -266,15 +266,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
 
     // ============================
-    // VERIFICAR SI EL FLUJO YA FINALIZÓ
-    // ============================
-    const finalStates = ['completado', 'rechazado', 'cancelado', 'error'];
-    if (currentState && finalStates.includes(currentState)) {
-      console.log(`🔒 Flujo ya finalizado con estado: ${currentState}. Ignorando mensaje.`);
-      return res.status(200).json({ ignored: 'flow already finished' });
-    }
-
-    // ============================
     // INICIAR FLUJO AUTOMÁTICAMENTE
     // ============================
     if (!currentState) {
