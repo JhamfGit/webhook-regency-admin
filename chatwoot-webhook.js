@@ -232,7 +232,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (nextStep === 'fin') {
       await sendChatwootMessage(
         conversationId,
-        '✅ Proceso de selección completado. Gracias por tu tiempo.'
+        'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'inicio');
       return res.json({ ok: true });
