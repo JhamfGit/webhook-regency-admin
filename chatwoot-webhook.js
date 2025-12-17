@@ -13,7 +13,7 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 // ================================
-// FLUJO DE PLANTILLAS
+// FLUJO
 // ================================
 const TEMPLATE_FLOW = {
   inicio: 'seleccion_certificado_bachiller',
@@ -25,11 +25,11 @@ const TEMPLATE_FLOW = {
 };
 
 const TEMPLATE_NAMES = {
-  seleccion_certificado_bachiller: 'certificado de bachiller',
-  seleccion_ubicacion_desplazamiento: 'ubicación y desplazamiento',
-  seleccion_familiares_empresa: 'familiares en la empresa',
-  seleccion_distancia_transporte: 'distancia y transporte',
-  seleccion_vinculacion_previa: 'vinculación previa'
+  seleccion_certificado_bachiller: 'Certificado de bachiller',
+  seleccion_ubicacion_desplazamiento: 'Ubicación y desplazamiento',
+  seleccion_familiares_empresa: 'Familiares en la empresa',
+  seleccion_distancia_transporte: 'Distancia al trabajo',
+  seleccion_vinculacion_previa: 'Vinculación previa'
 };
 
 // ================================
@@ -44,24 +44,35 @@ app.get('/', (req, res) => {
 // ================================
 async function getConversationState(conversationId) {
   try {
-    const response = await axios.get(
+    const res = await axios.get(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
       { headers: { api_access_token: API_KEY } }
     );
-    return response.data.custom_attributes?.template_state || 'inicio';
+    return res.data.custom_attributes?.template_state || 'inicio';
   } catch {
     return 'inicio';
   }
 }
 
-async function updateConversationState(conversationId, newState) {
+async function updateConversationState(conversationId, state) {
   await axios.post(
     `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
-    { custom_attributes: { template_state: newState } },
+    { custom_attributes: { template_state: state } },
     { headers: { api_access_token: API_KEY } }
   );
 }
 
+async function sendChatwootMessage(conversationId, content, isPrivate = false) {
+  await axios.post(
+    `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
+    { content, private: isPrivate },
+    { headers: { api_access_token: API_KEY } }
+  );
+}
+
+// ================================
+// WHATSAPP - TEMPLATE NORMAL
+// ================================
 async function sendWhatsAppTemplate(userPhone, templateName) {
   return axios.post(
     `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
@@ -77,7 +88,51 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
     {
       headers: {
         Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json"
+      }
+    }
+  );
+}
+
+// ================================
+// WHATSAPP - LISTA INTERACTIVA
+// ================================
+async function sendWhatsAppList(userPhone) {
+  return axios.post(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to: userPhone,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        header: {
+          type: "text",
+          text: "Distancia al trabajo"
+        },
+        body: {
+          text: "¿Cuál es el tiempo aproximado de traslado entre su residencia y el lugar de trabajo?"
+        },
+        action: {
+          button: "Ver todas las opciones",
+          sections: [
+            {
+              title: "Opciones",
+              rows: [
+                { id: "menos_15", title: "Menos de 15 minutos" },
+                { id: "15_30", title: "15 a 30 minutos" },
+                { id: "30_60", title: "30 minutos a 1 hora" },
+                { id: "mas_60", title: "Más de 1 hora" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
+        "Content-Type": "application/json"
       }
     }
   );
@@ -88,14 +143,10 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
 // ================================
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
-    const { event, message_type, conversation, content, additional_attributes } = req.body;
+    const { event, message_type, conversation, content } = req.body;
 
     if (event !== 'message_created' || message_type !== 'incoming') {
       return res.status(200).json({ ignored: true });
-    }
-
-    if (additional_attributes?.template_params) {
-      return res.status(200).json({ ignored: 'template message' });
     }
 
     if (!content?.trim()) {
@@ -110,76 +161,56 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState} | Respuesta: ${userMessage}`);
 
     // ============================
-    // RESPUESTA SI
+    // VALIDACIÓN SI / NO
     // ============================
-    if (userMessage === 'si') {
-
-      // ❌ SOLO AQUÍ TERMINA
-      if (currentState === 'seleccion_familiares_empresa') {
-        await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-          {
-            content: 'Gracias por tu respuesta. Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
-          },
-          { headers: { api_access_token: API_KEY } }
-        );
-
-        await updateConversationState(conversationId, 'inicio');
-        return res.status(200).json({ ok: true });
-      }
-
-      // ✅ CONTINÚA EN TODOS LOS DEMÁS CASOS
+    if (userMessage === 'si' && currentState === 'seleccion_familiares_empresa') {
+      await sendChatwootMessage(
+        conversationId,
+        '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
+      );
+      await updateConversationState(conversationId, 'inicio');
+      return res.status(200).json({ ok: true });
     }
 
-    // ============================
-    // RESPUESTA NO
-    // ============================
-    if (userMessage === 'no') {
+    if (userMessage === 'no' &&
+        currentState !== 'seleccion_familiares_empresa' &&
+        currentState !== 'seleccion_distancia_transporte' &&
+        currentState !== 'seleccion_vinculacion_previa') {
 
-      // ❌ SOLO TERMINA SI NO ES UNA EXCEPCIÓN
-      if (currentState !== 'seleccion_familiares_empresa' &&
-          currentState !== 'seleccion_distancia_transporte' &&
-          currentState !== 'seleccion_vinculacion_previa') {
-
-        await axios.post(
-          `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-          {
-            content: 'Entendido, proceso de selección cancelado. Gracias por tu tiempo.'
-          },
-          { headers: { api_access_token: API_KEY } }
-        );
-
-        await updateConversationState(conversationId, 'inicio');
-        return res.status(200).json({ ok: true });
-      }
+      await sendChatwootMessage(
+        conversationId,
+        '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
+      );
+      await updateConversationState(conversationId, 'inicio');
+      return res.status(200).json({ ok: true });
     }
 
     // ============================
     // AVANZAR FLUJO
     // ============================
-    const nextTemplate = TEMPLATE_FLOW[currentState];
+    const nextStep = TEMPLATE_FLOW[currentState];
 
-    if (nextTemplate === 'fin') {
-      await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-        { content: '✅ Proceso de selección completado. Gracias por tu tiempo.' },
-        { headers: { api_access_token: API_KEY } }
+    if (nextStep === 'fin') {
+      await sendChatwootMessage(
+        conversationId,
+        '✅ Proceso de selección completado. Gracias por tu tiempo.'
       );
-
       await updateConversationState(conversationId, 'inicio');
       return res.status(200).json({ ok: true });
     }
 
-    await sendWhatsAppTemplate(userPhone, nextTemplate);
-    await updateConversationState(conversationId, nextTemplate);
+    // 👉 DISTANCIA = LISTA
+    if (nextStep === 'seleccion_distancia_transporte') {
+      await sendWhatsAppList(userPhone);
+    } else {
+      await sendWhatsAppTemplate(userPhone, nextStep);
+    }
 
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-      {
-        content: `📋 Plantilla enviada: ${TEMPLATE_NAMES[nextTemplate] || nextTemplate}`,
-        private: true
-      },
-      { headers: { api_access_token: API_KEY } }
+    await updateConversationState(conversationId, nextStep);
+    await sendChatwootMessage(
+      conversationId,
+      `📋 Mensaje enviado: ${TEMPLATE_NAMES[nextStep] || nextStep}`,
+      true
     );
 
     res.status(200).json({ ok: true });
