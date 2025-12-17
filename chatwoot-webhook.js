@@ -37,9 +37,9 @@ const TEMPLATE_NAMES = {
 // Etiquetas disponibles para asignar aleatoriamente
 const AVAILABLE_LABELS = [
   'operacion-vial',
-  'pyb-accenotre',
+  'pyb-accenorte-vigilancia',
   'pyb-planta',
-  'pyb-recolector-miel-olivares'
+  'pyb-recolector-canguro'
 ];
 
 // Opciones válidas para cada lista interactiva
