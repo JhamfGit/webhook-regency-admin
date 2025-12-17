@@ -48,6 +48,42 @@ app.get('/', (_, res) => {
 });
 
 // ================================
+// ENDPOINT PARA INICIAR FLUJO MANUALMENTE
+// ================================
+app.post('/iniciar-flujo', async (req, res) => {
+  try {
+    const { conversationId, userPhone } = req.body;
+
+    if (!conversationId || !userPhone) {
+      return res.status(400).json({ 
+        error: 'Se requieren conversationId y userPhone' 
+      });
+    }
+
+    console.log(`🚀 Iniciando flujo manualmente para conversación: ${conversationId}`);
+
+    await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
+    await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+    
+    await sendChatwootMessage(
+      conversationId,
+      '✅ Flujo iniciado manualmente: Certificado de bachiller',
+      true
+    );
+
+    res.json({ 
+      ok: true, 
+      message: 'Flujo iniciado correctamente',
+      state: 'seleccion_certificado_bachiller'
+    });
+
+  } catch (error) {
+    console.error('❌ Error iniciando flujo:', error.message);
+    res.status(500).json({ error: 'Failed to start flow' });
+  }
+});
+
+// ================================
 // FUNCIONES AUXILIARES CHATWOOT
 // ================================
 async function getConversationState(conversationId) {
