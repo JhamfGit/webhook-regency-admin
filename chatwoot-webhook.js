@@ -96,7 +96,16 @@ async function addRandomLabelToConversation(conversationId) {
       { labels: [randomLabel] },
       { headers: { api_access_token: API_KEY } }
     );
+    
     console.log(`🏷️ Etiqueta aleatoria agregada: ${randomLabel}`);
+    
+    // Enviar mensaje privado visible al agente
+    await sendChatwootMessage(
+      conversationId,
+      `🏷️ Etiqueta asignada: ${randomLabel}`,
+      true
+    );
+    
   } catch (error) {
     console.error('⚠️ Error agregando etiqueta:', error.response?.data || error.message);
   }
@@ -255,6 +264,15 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const currentState = await getConversationState(conversationId);
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
+
+    // ============================
+    // VERIFICAR SI EL FLUJO YA FINALIZÓ
+    // ============================
+    const finalStates = ['completado', 'rechazado', 'cancelado', 'error'];
+    if (currentState && finalStates.includes(currentState)) {
+      console.log(`🔒 Flujo ya finalizado con estado: ${currentState}. Ignorando mensaje.`);
+      return res.status(200).json({ ignored: 'flow already finished' });
+    }
 
     // ============================
     // INICIAR FLUJO AUTOMÁTICAMENTE
