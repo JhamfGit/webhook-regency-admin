@@ -116,7 +116,14 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
         type: "template",
         template: {
           name: templateName,
-          language: { code: "es_CO" }
+          language: { code: "es_CO" },
+          components: [
+            {
+              type: "button",
+              sub_type: "list",
+              index: "0"
+            }
+          ]
         }
       },
       {
@@ -126,6 +133,7 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
         }
       }
     );
+
     return { success: true, data: response.data };
   } catch (error) {
     const errorDetail = error.response?.data || error.message;
@@ -133,6 +141,7 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
     return { success: false, error: errorDetail };
   }
 }
+
 
 async function endFlow(conversationId, message) {
   await sendChatwootMessage(conversationId, message);
