@@ -48,6 +48,42 @@ app.get('/', (_, res) => {
 });
 
 // ================================
+// ENDPOINT PARA INICIAR FLUJO MANUALMENTE
+// ================================
+app.post('/iniciar-flujo', async (req, res) => {
+  try {
+    const { conversationId, userPhone } = req.body;
+
+    if (!conversationId || !userPhone) {
+      return res.status(400).json({ 
+        error: 'Se requieren conversationId y userPhone' 
+      });
+    }
+
+    console.log(`🚀 Iniciando flujo manualmente para conversación: ${conversationId}`);
+
+    await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
+    await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+    
+    await sendChatwootMessage(
+      conversationId,
+      '✅ Flujo iniciado manualmente: Certificado de bachiller',
+      true
+    );
+
+    res.json({ 
+      ok: true, 
+      message: 'Flujo iniciado correctamente',
+      state: 'seleccion_certificado_bachiller'
+    });
+
+  } catch (error) {
+    console.error('❌ Error iniciando flujo:', error.message);
+    res.status(500).json({ error: 'Failed to start flow' });
+  }
+});
+
+// ================================
 // FUNCIONES AUXILIARES CHATWOOT
 // ================================
 async function getConversationState(conversationId) {
@@ -76,6 +112,19 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
     { content, private: isPrivate },
     { headers: { api_access_token: API_KEY } }
   );
+}
+
+async function addLabelToConversation(conversationId, labels) {
+  try {
+    await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
+      { labels },
+      { headers: { api_access_token: API_KEY } }
+    );
+    console.log(`🏷️ Etiquetas agregadas: ${labels.join(', ')}`);
+  } catch (error) {
+    console.error('⚠️ Error agregando etiquetas:', error.response?.data || error.message);
+  }
 }
 
 // ================================
@@ -234,34 +283,20 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
 
     // ============================
-    // INICIAR FLUJO SI NO HAY ESTADO ACTIVO
+    // VERIFICAR SI HAY UN FLUJO ACTIVO
     // ============================
     if (!currentState) {
-      // Palabras clave para iniciar el flujo
-      const startKeywords = ['hola', 'inicio', 'iniciar', 'comenzar', 'empezar', 'si', 'quiero aplicar'];
-      
-      if (startKeywords.some(keyword => userMessage.includes(keyword))) {
-        console.log('🚀 Iniciando nuevo flujo...');
-        
-        try {
-          await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
-          await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-          
-          await sendChatwootMessage(
-            conversationId,
-            '✅ Flujo iniciado: Certificado de bachiller',
-            true
-          );
-          
-          return res.json({ ok: true, started: true });
-        } catch (error) {
-          console.error('❌ Error iniciando flujo:', error.message);
-          return res.status(500).json({ error: 'failed to start flow' });
-        }
-      }
-      
       console.log('⏸️ No hay flujo activo. Mensaje ignorado.');
       return res.status(200).json({ ignored: 'no active flow' });
+    }
+
+    // ============================
+    // IGNORAR MENSAJES SI EL FLUJO YA TERMINÓ
+    // ============================
+    const finalStates = ['completado', 'rechazado', 'cancelado', 'error'];
+    if (finalStates.includes(currentState)) {
+      console.log(`🔒 Flujo finalizado con estado: ${currentState}. Mensaje ignorado.`);
+      return res.status(200).json({ ignored: 'flow already finished' });
     }
 
     // ============================
@@ -302,6 +337,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
       await updateConversationState(conversationId, 'rechazado');
+      await addLabelToConversation(conversationId, ['pyb-planta']);
       return res.json({ ok: true, stopped: true });
     }
 
@@ -316,6 +352,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'cancelado');
+      await addLabelToConversation(conversationId, ['pyb-planta']);
       return res.json({ ok: true, stopped: true });
     }
 
@@ -327,9 +364,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (nextStep === 'fin') {
       await sendChatwootMessage(
         conversationId,
-        'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
+        '✅ Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
+      await addLabelToConversation(conversationId, ['pyb-recolector-miel-olivares']);
       return res.json({ ok: true, completed: true });
     }
 
@@ -363,6 +401,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       
       await updateConversationState(conversationId, 'error');
+      await addLabelToConversation(conversationId, ['operacion-vial']);
       res.status(500).json({ error: 'send message failed' });
     }
 
