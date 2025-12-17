@@ -34,6 +34,14 @@ const TEMPLATE_NAMES = {
   seleccion_vinculacion_previa: 'Vinculación previa'
 };
 
+// Etiquetas disponibles para asignar aleatoriamente
+const AVAILABLE_LABELS = [
+  'operacion-vial',
+  'pyb-accenotre',
+  'pyb-planta',
+  'pyb-recolector-miel-olivares'
+];
+
 // Opciones válidas para cada lista interactiva
 const VALID_RESPONSES = {
   seleccion_distancia_transporte: ['menos_15', '15_30', '30_60', 'mas_60', 'menos de 15 minutos', '15 a 30 minutos', '30 minutos a 1 hora', 'más de 1 hora'],
@@ -45,42 +53,6 @@ const VALID_RESPONSES = {
 // ================================
 app.get('/', (_, res) => {
   res.status(200).send('OK');
-});
-
-// ================================
-// ENDPOINT PARA INICIAR FLUJO MANUALMENTE
-// ================================
-app.post('/iniciar-flujo', async (req, res) => {
-  try {
-    const { conversationId, userPhone } = req.body;
-
-    if (!conversationId || !userPhone) {
-      return res.status(400).json({ 
-        error: 'Se requieren conversationId y userPhone' 
-      });
-    }
-
-    console.log(`🚀 Iniciando flujo manualmente para conversación: ${conversationId}`);
-
-    await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
-    await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-    
-    await sendChatwootMessage(
-      conversationId,
-      '✅ Flujo iniciado manualmente: Certificado de bachiller',
-      true
-    );
-
-    res.json({ 
-      ok: true, 
-      message: 'Flujo iniciado correctamente',
-      state: 'seleccion_certificado_bachiller'
-    });
-
-  } catch (error) {
-    console.error('❌ Error iniciando flujo:', error.message);
-    res.status(500).json({ error: 'Failed to start flow' });
-  }
 });
 
 // ================================
@@ -114,16 +86,19 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
   );
 }
 
-async function addLabelToConversation(conversationId, labels) {
+async function addRandomLabelToConversation(conversationId) {
   try {
+    // Seleccionar etiqueta aleatoria
+    const randomLabel = AVAILABLE_LABELS[Math.floor(Math.random() * AVAILABLE_LABELS.length)];
+    
     await axios.post(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
-      { labels },
+      { labels: [randomLabel] },
       { headers: { api_access_token: API_KEY } }
     );
-    console.log(`🏷️ Etiquetas agregadas: ${labels.join(', ')}`);
+    console.log(`🏷️ Etiqueta aleatoria agregada: ${randomLabel}`);
   } catch (error) {
-    console.error('⚠️ Error agregando etiquetas:', error.response?.data || error.message);
+    console.error('⚠️ Error agregando etiqueta:', error.response?.data || error.message);
   }
 }
 
@@ -268,7 +243,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // Ignorar mensajes de listas interactivas (vienen con button_reply)
     if (additional_attributes?.button_reply || additional_attributes?.list_reply) {
       console.log('📱 Respuesta de lista interactiva detectada');
-      // Estos mensajes se procesarán normalmente abajo
     }
 
     if (!content?.trim()) {
@@ -283,20 +257,26 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
 
     // ============================
-    // VERIFICAR SI HAY UN FLUJO ACTIVO
+    // INICIAR FLUJO AUTOMÁTICAMENTE
     // ============================
     if (!currentState) {
-      console.log('⏸️ No hay flujo activo. Mensaje ignorado.');
-      return res.status(200).json({ ignored: 'no active flow' });
-    }
-
-    // ============================
-    // IGNORAR MENSAJES SI EL FLUJO YA TERMINÓ
-    // ============================
-    const finalStates = ['completado', 'rechazado', 'cancelado', 'error'];
-    if (finalStates.includes(currentState)) {
-      console.log(`🔒 Flujo finalizado con estado: ${currentState}. Mensaje ignorado.`);
-      return res.status(200).json({ ignored: 'flow already finished' });
+      console.log('🚀 Iniciando flujo automáticamente...');
+      
+      try {
+        await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
+        await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+        
+        await sendChatwootMessage(
+          conversationId,
+          '✅ Flujo iniciado: Certificado de bachiller',
+          true
+        );
+        
+        return res.json({ ok: true, started: true });
+      } catch (error) {
+        console.error('❌ Error iniciando flujo:', error.message);
+        return res.status(500).json({ error: 'failed to start flow' });
+      }
     }
 
     // ============================
@@ -305,7 +285,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (!isValidResponse(currentState, userMessage)) {
       console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
       
-      // Mensaje de ayuda según el tipo de pregunta
       let helpMessage = '';
       if (VALID_RESPONSES[currentState]) {
         helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
@@ -314,10 +293,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
       }
       
       await sendChatwootMessage(conversationId, helpMessage);
-      return res.status(200).json({ ok: true, message: 'invalid response, help sent' });
+      return res.status(200).json({ ok: true, message: 'invalid response' });
     }
 
-    // Guardar respuestas informativas en Chatwoot
+    // Guardar respuestas informativas
     if (currentState === 'seleccion_distancia_transporte' || currentState === 'seleccion_medio_transporte') {
       await sendChatwootMessage(
         conversationId,
@@ -337,11 +316,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
       await updateConversationState(conversationId, 'rechazado');
-      await addLabelToConversation(conversationId, ['pyb-planta']);
+      await addRandomLabelToConversation(conversationId);
       return res.json({ ok: true, stopped: true });
     }
 
-    // ❌ Cancelación general (solo para preguntas si/no críticas)
+    // ❌ Cancelación general
     if (
       userMessage === 'no' &&
       !['seleccion_familiares_empresa', 'seleccion_distancia_transporte', 
@@ -352,7 +331,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'cancelado');
-      await addLabelToConversation(conversationId, ['pyb-planta']);
+      await addRandomLabelToConversation(conversationId);
       return res.json({ ok: true, stopped: true });
     }
 
@@ -367,7 +346,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '✅ Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
-      await addLabelToConversation(conversationId, ['pyb-recolector-miel-olivares']);
+      await addRandomLabelToConversation(conversationId);
       return res.json({ ok: true, completed: true });
     }
 
@@ -401,7 +380,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       
       await updateConversationState(conversationId, 'error');
-      await addLabelToConversation(conversationId, ['operacion-vial']);
+      await addRandomLabelToConversation(conversationId);
       res.status(500).json({ error: 'send message failed' });
     }
 
