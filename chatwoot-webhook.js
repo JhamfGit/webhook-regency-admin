@@ -151,10 +151,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.status(200).json({ ignored: 'not incoming message' });
     }
 
-    // Ignorar mensajes de plantillas (templates)
-    if (additional_attributes?.template_params) {
-      return res.status(200).json({ ignored: 'template message' });
+    // Ignorar SOLO mensajes salientes automáticos
+    if (message_type !== 'incoming') {
+      return res.status(200).json({ ignored: 'not incoming' });
     }
+
 
     if (!content?.trim()) {
       return res.status(200).json({ ignored: 'empty message' });
