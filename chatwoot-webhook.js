@@ -234,9 +234,32 @@ app.post('/chatwoot-webhook', async (req, res) => {
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
 
     // ============================
-    // VERIFICAR SI HAY UN FLUJO ACTIVO
+    // INICIAR FLUJO SI NO HAY ESTADO ACTIVO
     // ============================
     if (!currentState) {
+      // Palabras clave para iniciar el flujo
+      const startKeywords = ['hola', 'inicio', 'iniciar', 'comenzar', 'empezar', 'si', 'quiero aplicar'];
+      
+      if (startKeywords.some(keyword => userMessage.includes(keyword))) {
+        console.log('🚀 Iniciando nuevo flujo...');
+        
+        try {
+          await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
+          await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+          
+          await sendChatwootMessage(
+            conversationId,
+            '✅ Flujo iniciado: Certificado de bachiller',
+            true
+          );
+          
+          return res.json({ ok: true, started: true });
+        } catch (error) {
+          console.error('❌ Error iniciando flujo:', error.message);
+          return res.status(500).json({ error: 'failed to start flow' });
+        }
+      }
+      
       console.log('⏸️ No hay flujo activo. Mensaje ignorado.');
       return res.status(200).json({ ignored: 'no active flow' });
     }
