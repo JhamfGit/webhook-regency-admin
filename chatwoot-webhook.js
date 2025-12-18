@@ -391,6 +391,14 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     const currentState = await getConversationState(conversationId);
     const proyecto = await getConversationProject(conversationId);
+    // ============================
+    // BLOQUEAR CONVERSACIONES FINALIZADAS
+    // ============================
+    if (['completado', 'rechazado', 'cancelado', 'error'].includes(currentState)) {
+      console.log(`🛑 Conversación en estado final (${currentState}). No se responde.`);
+      return res.status(200).json({ ignored: 'conversation finished' });
+    }
+
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
     console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
