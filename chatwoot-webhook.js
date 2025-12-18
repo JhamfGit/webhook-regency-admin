@@ -39,7 +39,8 @@ const AVAILABLE_LABELS = [
   'operacion-vial',
   'pyb-accenorte-vigilancia',
   'pyb-planta',
-  'pyb-recolector-canguro'
+  'pyb-recolector-canguro',
+  'admin-tolis'
 ];
 
 // Opciones válidas para cada lista interactiva
