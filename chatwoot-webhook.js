@@ -82,6 +82,24 @@ const VALID_RESPONSES = {
 };
 
 // ================================
+// CACHE SIMPLE PARA REDUCIR LLAMADAS
+// ================================
+const conversationCache = new Map();
+const CACHE_TTL = 60000; // 1 minuto
+
+function getCachedData(key) {
+  const cached = conversationCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCachedData(key, data) {
+  conversationCache.set(key, { data, timestamp: Date.now() });
+}
+
+// ================================
 // HEALTH CHECK
 // ================================
 app.get('/', (_, res) => {
@@ -92,12 +110,21 @@ app.get('/', (_, res) => {
 // FUNCIONES AUXILIARES CHATWOOT
 // ================================
 async function getConversationAttributes(conversationId) {
+  const cacheKey = `attrs_${conversationId}`;
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
   try {
     const res = await axios.get(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
-      { headers: { api_access_token: API_KEY } }
+      { 
+        headers: { api_access_token: API_KEY },
+        timeout: 5000
+      }
     );
-    return res.data.custom_attributes || {};
+    const attrs = res.data.custom_attributes || {};
+    setCachedData(cacheKey, attrs);
+    return attrs;
   } catch (error) {
     console.error('❌ Error obteniendo atributos:', error.message);
     return {};
@@ -115,10 +142,16 @@ async function getConversationProject(conversationId) {
 }
 
 async function updateConversationAttributes(conversationId, attributes) {
+  const cacheKey = `attrs_${conversationId}`;
+  conversationCache.delete(cacheKey); // Invalidar cache
+  
   await axios.post(
     `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
     { custom_attributes: attributes },
-    { headers: { api_access_token: API_KEY } }
+    { 
+      headers: { api_access_token: API_KEY },
+      timeout: 5000
+    }
   );
 }
 
@@ -134,16 +167,16 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
   await axios.post(
     `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
     { content, private: isPrivate },
-    { headers: { api_access_token: API_KEY } }
+    { 
+      headers: { api_access_token: API_KEY },
+      timeout: 5000
+    }
   );
 }
 
 async function assignLabelByProject(conversationId, proyecto) {
   try {
-    // Normalizar el nombre del proyecto (trimear espacios y convertir a uppercase)
     const normalizedProject = proyecto.trim().toUpperCase();
-    
-    // Buscar el equipo correspondiente
     const team = PROJECT_TO_TEAM[normalizedProject];
     
     if (!team) {
@@ -160,7 +193,10 @@ async function assignLabelByProject(conversationId, proyecto) {
     await axios.post(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
       { labels: [team] },
-      { headers: { api_access_token: API_KEY } }
+      { 
+        headers: { api_access_token: API_KEY },
+        timeout: 5000
+      }
     );
     
     console.log(`🎯 Proyecto "${proyecto}" → Equipo: ${team}`);
@@ -198,7 +234,8 @@ async function sendWhatsAppTemplate(userPhone, templateName) {
       headers: {
         Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
         "Content-Type": "application/json"
-      }
+      },
+      timeout: 10000
     }
   );
 }
@@ -239,7 +276,8 @@ async function sendWhatsAppDistancia(userPhone) {
       headers: {
         Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
         "Content-Type": "application/json"
-      }
+      },
+      timeout: 10000
     }
   );
 }
@@ -281,7 +319,8 @@ async function sendWhatsAppMedioTransporte(userPhone) {
       headers: {
         Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
         "Content-Type": "application/json"
-      }
+      },
+      timeout: 10000
     }
   );
 }
@@ -290,14 +329,12 @@ async function sendWhatsAppMedioTransporte(userPhone) {
 // VALIDACIÓN DE RESPUESTAS
 // ================================
 function isValidResponse(state, message) {
-  // Para estados con listas interactivas, validar opciones
   if (VALID_RESPONSES[state]) {
     return VALID_RESPONSES[state].some(option => 
       message.toLowerCase().includes(option.toLowerCase())
     );
   }
   
-  // Para estados de si/no
   if (['seleccion_certificado_bachiller', 'seleccion_ubicacion_desplazamiento', 
        'seleccion_familiares_empresa', 'seleccion_vinculacion_previa'].includes(state)) {
     return message === 'si' || message === 'no';
@@ -307,28 +344,51 @@ function isValidResponse(state, message) {
 }
 
 // ================================
+// EXTRACTOR DE RESPUESTA DE LISTA
+// ================================
+function extractListResponse(additionalAttributes) {
+  if (additionalAttributes?.list_reply) {
+    return additionalAttributes.list_reply.id || null;
+  }
+  if (additionalAttributes?.button_reply) {
+    return additionalAttributes.button_reply.id || null;
+  }
+  return null;
+}
+
+// ================================
 // WEBHOOK CHATWOOT
 // ================================
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
     const { event, message_type, conversation, content, additional_attributes } = req.body;
 
+    // Solo procesar mensajes entrantes
     if (event !== 'message_created' || message_type !== 'incoming') {
       return res.status(200).json({ ignored: 'not incoming message' });
     }
 
-    // Ignorar mensajes de listas interactivas (vienen con button_reply)
-    if (additional_attributes?.button_reply || additional_attributes?.list_reply) {
-      console.log('📱 Respuesta de lista interactiva detectada');
+    const conversationId = conversation.id;
+    const userPhone = conversation.contact_inbox?.source_id;
+    
+    if (!userPhone) {
+      console.log('⚠️ No se encontró source_id (número de teléfono)');
+      return res.status(200).json({ ignored: 'no phone number' });
     }
 
-    if (!content?.trim()) {
+    // Extraer respuesta de lista interactiva si existe
+    const listResponse = extractListResponse(additional_attributes);
+    let userMessage = '';
+
+    if (listResponse) {
+      console.log('📱 Respuesta de lista interactiva:', listResponse);
+      userMessage = listResponse;
+    } else if (content?.trim()) {
+      userMessage = content.trim().toLowerCase();
+    } else {
       return res.status(200).json({ ignored: 'empty message' });
     }
 
-    const userMessage = content.trim().toLowerCase();
-    const conversationId = conversation.id;
-    const userPhone = conversation.contact_inbox.source_id;
     const currentState = await getConversationState(conversationId);
     const proyecto = await getConversationProject(conversationId);
 
@@ -347,7 +407,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'No definido'}`,
           true
         );
         
@@ -356,11 +416,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
         console.error('❌ Error iniciando flujo:', error.message);
         return res.status(500).json({ error: 'failed to start flow' });
       }
-    }
-
-    // Si no hay estado, ignorar
-    if (!currentState) {
-      return res.status(200).json({ ignored: 'no state' });
     }
 
     // ============================
@@ -373,7 +428,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       if (VALID_RESPONSES[currentState]) {
         helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
       } else {
-        helpMessage = '⚠️ Espere mientras un asesor se comunica con usted!';
+        helpMessage = '⚠️ Por favor responde "si" o "no".';
       }
       
       await sendChatwootMessage(conversationId, helpMessage);
@@ -382,9 +437,13 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     // Guardar respuestas informativas
     if (currentState === 'seleccion_distancia_transporte' || currentState === 'seleccion_medio_transporte') {
+      const displayValue = VALID_RESPONSES[currentState].find(opt => 
+        opt.toLowerCase() === userMessage.toLowerCase()
+      ) || userMessage;
+      
       await sendChatwootMessage(
         conversationId,
-        `📝 ${TEMPLATE_NAMES[currentState]}: ${content}`,
+        `📝 ${TEMPLATE_NAMES[currentState]}: ${displayValue}`,
         true
       );
     }
@@ -401,12 +460,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'rechazado');
       
-      // Asignar etiqueta según proyecto
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
       
-      return res.json({ ok: true, stopped: true });
+      return res.json({ ok: true, stopped: true, reason: 'familiares' });
     }
 
     // ❌ Cancelación general
@@ -421,12 +479,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'cancelado');
       
-      // Asignar etiqueta según proyecto
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
       
-      return res.json({ ok: true, stopped: true });
+      return res.json({ ok: true, stopped: true, reason: 'usuario_cancelo' });
     }
 
     // ============================
@@ -437,11 +494,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (nextStep === 'fin') {
       await sendChatwootMessage(
         conversationId,
-        'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
+        '✅ Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
       
-      // Asignar etiqueta según proyecto
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       } else {
@@ -482,7 +538,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
       
       await updateConversationState(conversationId, 'error');
       
-      // Asignar etiqueta según proyecto incluso en error
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
@@ -495,6 +550,71 @@ app.post('/chatwoot-webhook', async (req, res) => {
     res.status(500).json({ error: 'Webhook error' });
   }
 });
+
+// ================================
+// ENDPOINT PARA INICIAR FLUJO MANUALMENTE
+// ================================
+app.post('/start-flow', async (req, res) => {
+  try {
+    const { phone, proyecto } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({ error: 'phone is required' });
+    }
+
+    // Buscar conversación activa por teléfono
+    const conversations = await axios.get(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
+      { 
+        headers: { api_access_token: API_KEY },
+        params: { status: 'open' }
+      }
+    );
+
+    const conversation = conversations.data.find(
+      c => c.contact_inbox?.source_id === phone
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'conversation not found' });
+    }
+
+    const conversationId = conversation.id;
+
+    // Actualizar proyecto si se proporciona
+    if (proyecto) {
+      await updateConversationAttributes(conversationId, { proyecto });
+    }
+
+    // Iniciar flujo
+    await sendWhatsAppTemplate(phone, 'seleccion_certificado_bachiller');
+    await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+    
+    await sendChatwootMessage(
+      conversationId,
+      `✅ Flujo iniciado manualmente\n📋 Proyecto: ${proyecto || 'No especificado'}`,
+      true
+    );
+
+    res.json({ ok: true, conversationId, proyecto });
+
+  } catch (error) {
+    console.error('❌ Error en start-flow:', error.message);
+    res.status(500).json({ error: 'failed to start flow' });
+  }
+});
+
+// ================================
+// LIMPIEZA DE CACHE PERIÓDICA
+// ================================
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of conversationCache.entries()) {
+    if (now - value.timestamp > CACHE_TTL) {
+      conversationCache.delete(key);
+    }
+  }
+}, 60000); // Cada minuto
 
 // ================================
 // SERVER
