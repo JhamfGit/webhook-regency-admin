@@ -99,14 +99,7 @@ async function addRandomLabelToConversation(conversationId) {
     );
     
     console.log(`🏷️ Etiqueta aleatoria agregada: ${randomLabel}`);
-    
-    // Enviar mensaje privado visible al agente
-    await sendChatwootMessage(
-      conversationId,
-      `🏷️ Etiqueta asignada: ${randomLabel}`,
-      true
-    );
-    
+      
   } catch (error) {
     console.error('⚠️ Error agregando etiqueta:', error.response?.data || error.message);
   }
