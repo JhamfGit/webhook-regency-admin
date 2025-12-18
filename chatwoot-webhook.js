@@ -428,7 +428,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       if (VALID_RESPONSES[currentState]) {
         helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
       } else {
-        helpMessage = '⚠️ Por favor responde "si" o "no".';
+        helpMessage = '⚠️ Espere mientras un asesor lo atiende';
       }
       
       await sendChatwootMessage(conversationId, helpMessage);
