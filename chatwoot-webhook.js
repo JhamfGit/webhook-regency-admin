@@ -13,6 +13,47 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 // ================================
+// MAPEO DE PROYECTOS A EQUIPOS
+// ================================
+const PROJECT_TO_TEAM = {
+  // Admin-tolis
+  'SUMAPAZ': 'admin-tolis',
+  'GICA OP VIAL': 'admin-tolis',
+  'RUTA AL SUR OP VIAL': 'admin-tolis',
+  'VINUS OP VIAL': 'admin-tolis',
+  
+  // Operación vial
+  'ACCENORTE': 'operacion-vial',
+  'FRIGORINUS VIGILANCIA': 'operacion-vial',
+  'MINEROS LA MARIA VIGILANCIA': 'operacion-vial',
+  'APP GICA (VIGILANCIA)': 'operacion-vial',
+  'DS EL FARO 118 VIGILANCIA': 'operacion-vial',
+  'VINUS - VIGILANCIA': 'operacion-vial',
+  'RUTA AL SUR - VIGILANCIA': 'operacion-vial',
+  'RUTAS DEL VALLE - VIGILANCIA': 'operacion-vial',
+  'ACCENORTE - VIGILANCIA': 'operacion-vial',
+  'CONSORCIO PEAJES 2526 - VIGILANCIA': 'operacion-vial',
+  
+  // PyB Accenorte Vigilancia
+  'CONSORCIO PEAJES 2526 - PLANTA': 'pyb-accenorte-vigilancia',
+  'RUTA AL SUR - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
+  'RUTAS DEL VALLE - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
+  'GICA - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
+  'CONSORCIO PEAJES 2526 - CANGUROS': 'pyb-accenorte-vigilancia',
+  
+  // PyB Planta
+  'RUTA AL SUR PLANTA': 'pyb-planta',
+  'RUTAS DEL VALLE PLANTA': 'pyb-planta',
+  'RUTAS DEL VALLE': 'pyb-planta',
+  'GICA PLANTA': 'pyb-planta',
+  'VINUS PLANTA': 'pyb-planta',
+  
+  // PyB Recolector Canguro
+  'ADMINISTRACION': 'pyb-recolector-canguro',
+  'TOLIS': 'pyb-recolector-canguro'
+};
+
+// ================================
 // FLUJO DE ESTADOS
 // ================================
 const TEMPLATE_FLOW = {
@@ -34,15 +75,6 @@ const TEMPLATE_NAMES = {
   seleccion_vinculacion_previa: 'Vinculación previa'
 };
 
-// Etiquetas disponibles para asignar aleatoriamente
-const AVAILABLE_LABELS = [
-  'operacion-vial',
-  'pyb-accenorte-vigilancia',
-  'pyb-planta',
-  'pyb-recolector-canguro',
-  'admin-tolis'
-];
-
 // Opciones válidas para cada lista interactiva
 const VALID_RESPONSES = {
   seleccion_distancia_transporte: ['menos_15', '15_30', '30_60', 'mas_60', 'menos de 15 minutos', '15 a 30 minutos', '30 minutos a 1 hora', 'más de 1 hora'],
@@ -59,24 +91,43 @@ app.get('/', (_, res) => {
 // ================================
 // FUNCIONES AUXILIARES CHATWOOT
 // ================================
-async function getConversationState(conversationId) {
+async function getConversationAttributes(conversationId) {
   try {
     const res = await axios.get(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
       { headers: { api_access_token: API_KEY } }
     );
-    return res.data.custom_attributes?.template_state || null;
-  } catch {
-    return null;
+    return res.data.custom_attributes || {};
+  } catch (error) {
+    console.error('❌ Error obteniendo atributos:', error.message);
+    return {};
   }
 }
 
-async function updateConversationState(conversationId, state) {
+async function getConversationState(conversationId) {
+  const attrs = await getConversationAttributes(conversationId);
+  return attrs.template_state || null;
+}
+
+async function getConversationProject(conversationId) {
+  const attrs = await getConversationAttributes(conversationId);
+  return attrs.proyecto || null;
+}
+
+async function updateConversationAttributes(conversationId, attributes) {
   await axios.post(
     `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/custom_attributes`,
-    { custom_attributes: { template_state: state } },
+    { custom_attributes: attributes },
     { headers: { api_access_token: API_KEY } }
   );
+}
+
+async function updateConversationState(conversationId, state) {
+  const currentAttrs = await getConversationAttributes(conversationId);
+  await updateConversationAttributes(conversationId, {
+    ...currentAttrs,
+    template_state: state
+  });
 }
 
 async function sendChatwootMessage(conversationId, content, isPrivate = false) {
@@ -87,21 +138,44 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
   );
 }
 
-async function addRandomLabelToConversation(conversationId) {
+async function assignLabelByProject(conversationId, proyecto) {
   try {
-    // Seleccionar etiqueta aleatoria
-    const randomLabel = AVAILABLE_LABELS[Math.floor(Math.random() * AVAILABLE_LABELS.length)];
+    // Normalizar el nombre del proyecto (trimear espacios y convertir a uppercase)
+    const normalizedProject = proyecto.trim().toUpperCase();
     
+    // Buscar el equipo correspondiente
+    const team = PROJECT_TO_TEAM[normalizedProject];
+    
+    if (!team) {
+      console.log(`⚠️ Proyecto "${proyecto}" no encontrado en el mapeo`);
+      await sendChatwootMessage(
+        conversationId,
+        `⚠️ Proyecto "${proyecto}" no mapeado a ningún equipo`,
+        true
+      );
+      return null;
+    }
+    
+    // Asignar la etiqueta
     await axios.post(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/labels`,
-      { labels: [randomLabel] },
+      { labels: [team] },
       { headers: { api_access_token: API_KEY } }
     );
     
-    console.log(`🏷️ Etiqueta aleatoria agregada: ${randomLabel}`);
+    console.log(`🎯 Proyecto "${proyecto}" → Equipo: ${team}`);
+    
+    await sendChatwootMessage(
+      conversationId,
+      `✅ Etiqueta asignada: ${team} (Proyecto: ${proyecto})`,
+      true
+    );
+    
+    return team;
       
   } catch (error) {
-    console.error('⚠️ Error agregando etiqueta:', error.response?.data || error.message);
+    console.error('⚠️ Error asignando etiqueta por proyecto:', error.response?.data || error.message);
+    return null;
   }
 }
 
@@ -256,8 +330,10 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const conversationId = conversation.id;
     const userPhone = conversation.contact_inbox.source_id;
     const currentState = await getConversationState(conversationId);
+    const proyecto = await getConversationProject(conversationId);
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
+    console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
 
     // ============================
     // INICIAR FLUJO AUTOMÁTICAMENTE
@@ -271,15 +347,20 @@ app.post('/chatwoot-webhook', async (req, res) => {
         
         await sendChatwootMessage(
           conversationId,
-          '✅ Flujo iniciado: Certificado de bachiller',
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
           true
         );
         
-        return res.json({ ok: true, started: true });
+        return res.json({ ok: true, started: true, proyecto });
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
         return res.status(500).json({ error: 'failed to start flow' });
       }
+    }
+
+    // Si no hay estado, ignorar
+    if (!currentState) {
+      return res.status(200).json({ ignored: 'no state' });
     }
 
     // ============================
@@ -292,7 +373,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       if (VALID_RESPONSES[currentState]) {
         helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
       } else {
-        helpMessage = '⚠️ Espere mientras un asesor se comunica con usted!';
+        helpMessage = '⚠️ Por favor responde únicamente "si" o "no".';
       }
       
       await sendChatwootMessage(conversationId, helpMessage);
@@ -319,7 +400,12 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
       await updateConversationState(conversationId, 'rechazado');
-      await addRandomLabelToConversation(conversationId);
+      
+      // Asignar etiqueta según proyecto
+      if (proyecto) {
+        await assignLabelByProject(conversationId, proyecto);
+      }
+      
       return res.json({ ok: true, stopped: true });
     }
 
@@ -334,7 +420,12 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'cancelado');
-      await addRandomLabelToConversation(conversationId);
+      
+      // Asignar etiqueta según proyecto
+      if (proyecto) {
+        await assignLabelByProject(conversationId, proyecto);
+      }
+      
       return res.json({ ok: true, stopped: true });
     }
 
@@ -349,7 +440,14 @@ app.post('/chatwoot-webhook', async (req, res) => {
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
-      await addRandomLabelToConversation(conversationId);
+      
+      // Asignar etiqueta según proyecto
+      if (proyecto) {
+        await assignLabelByProject(conversationId, proyecto);
+      } else {
+        console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
+      }
+      
       return res.json({ ok: true, completed: true });
     }
 
@@ -383,7 +481,12 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       
       await updateConversationState(conversationId, 'error');
-      await addRandomLabelToConversation(conversationId);
+      
+      // Asignar etiqueta según proyecto incluso en error
+      if (proyecto) {
+        await assignLabelByProject(conversationId, proyecto);
+      }
+      
       res.status(500).json({ error: 'send message failed' });
     }
 
@@ -400,4 +503,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Webhook listening on port ${PORT}`);
   console.log(`📋 Flujo configurado con ${Object.keys(TEMPLATE_FLOW).length} estados`);
+  console.log(`🏷️ Proyectos mapeados: ${Object.keys(PROJECT_TO_TEAM).length}`);
 });
