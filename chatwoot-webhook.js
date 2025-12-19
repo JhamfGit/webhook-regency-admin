@@ -363,57 +363,12 @@ app.post('/chatwoot-webhook', async (req, res) => {
   try {
     const { event, message_type, conversation, content, additional_attributes } = req.body;
 
-    const conversationId = conversation.id;
-
-    // ============================
-    // MANEJAR CONVERSACIÓN CREADA
-    // ============================
-    if (event === 'conversation_created') {
-      const proyecto = conversation.custom_attributes?.proyecto || null;
-      
-      if (proyecto) {
-        console.log(`✅ Conversación creada con proyecto: ${proyecto}`);
-        await sendChatwootMessage(
-          conversationId,
-          `📋 Proyecto detectado: ${proyecto}\n⏳ Esperando primer mensaje del usuario para iniciar flujo...`,
-          true
-        );
-      } else {
-        console.log('⚠️ Conversación creada sin proyecto');
-        await sendChatwootMessage(
-          conversationId,
-          `⚠️ Esta conversación no tiene proyecto asignado.\n\n📝 Por favor, establece el atributo personalizado "proyecto" antes de iniciar el flujo.\n\nEjemplos: SUMAPAZ, ACCENORTE, VINUS PLANTA, etc.`,
-          true
-        );
-      }
-      
-      return res.status(200).json({ ok: true, event: 'conversation_created', proyecto });
-    }
-
-    // ============================
-    // MANEJAR CONVERSACIÓN ACTUALIZADA
-    // ============================
-    if (event === 'conversation_updated') {
-      const proyecto = conversation.custom_attributes?.proyecto || null;
-      const currentState = await getConversationState(conversationId);
-      
-      if (proyecto && !currentState) {
-        console.log(`✅ Proyecto establecido: ${proyecto} (sin flujo iniciado aún)`);
-        await sendChatwootMessage(
-          conversationId,
-          `📋 Proyecto actualizado a: ${proyecto}\n⏳ El flujo se iniciará cuando el usuario envíe un mensaje.`,
-          true
-        );
-      }
-      
-      return res.status(200).json({ ok: true, event: 'conversation_updated', proyecto });
-    }
-
     // Solo procesar mensajes entrantes
     if (event !== 'message_created' || message_type !== 'incoming') {
       return res.status(200).json({ ignored: 'not incoming message' });
     }
 
+    const conversationId = conversation.id;
     const userPhone = conversation.contact_inbox?.source_id;
     
     if (!userPhone) {
@@ -436,7 +391,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     const currentState = await getConversationState(conversationId);
     const proyecto = await getConversationProject(conversationId);
-
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
     // ============================
@@ -444,6 +398,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       console.log(`🛑 Conversación en estado final (${currentState}). No se responde.`);
       return res.status(200).json({ ignored: 'conversation finished' });
     }
+
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
     console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
@@ -454,28 +409,13 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (!currentState) {
       console.log('🚀 Iniciando flujo automáticamente...');
       
-      // ⚠️ VALIDAR QUE EXISTA EL PROYECTO
-      if (!proyecto) {
-        await sendChatwootMessage(
-          conversationId,
-          '⚠️ Esta conversación no tiene un proyecto asignado.\n\n📝 Por favor, establece el atributo personalizado "proyecto" en Chatwoot antes de continuar.\n\nEjemplos: SUMAPAZ, ACCENORTE, VINUS PLANTA, etc.',
-          false
-        );
-        await sendChatwootMessage(
-          conversationId,
-          '🔴 ACCIÓN REQUERIDA: Asignar proyecto en Custom Attributes',
-          true
-        );
-        return res.status(400).json({ error: 'proyecto no definido' });
-      }
-      
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
         
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'No definido'}`,
           true
         );
         
@@ -569,7 +509,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       } else {
-        console.log('⚠️ No hay proyecto definido al finalizar, no se asignó etiqueta');
+        console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
       }
       
       return res.json({ ok: true, completed: true });
@@ -630,10 +570,6 @@ app.post('/start-flow', async (req, res) => {
       return res.status(400).json({ error: 'phone is required' });
     }
 
-    if (!proyecto) {
-      return res.status(400).json({ error: 'proyecto is required' });
-    }
-
     // Buscar conversación activa por teléfono
     const conversations = await axios.get(
       `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
@@ -653,8 +589,10 @@ app.post('/start-flow', async (req, res) => {
 
     const conversationId = conversation.id;
 
-    // Establecer proyecto
-    await updateConversationAttributes(conversationId, { proyecto });
+    // Actualizar proyecto si se proporciona
+    if (proyecto) {
+      await updateConversationAttributes(conversationId, { proyecto });
+    }
 
     // Iniciar flujo
     await sendWhatsAppTemplate(phone, 'seleccion_certificado_bachiller');
@@ -662,7 +600,7 @@ app.post('/start-flow', async (req, res) => {
     
     await sendChatwootMessage(
       conversationId,
-      `✅ Flujo iniciado manualmente\n📋 Proyecto: ${proyecto}`,
+      `✅ Flujo iniciado manualmente\n📋 Proyecto: ${proyecto || 'No especificado'}`,
       true
     );
 
