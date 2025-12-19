@@ -215,24 +215,6 @@ async function assignLabelByProject(conversationId, proyecto) {
   }
 }
 
-// ============================
-// DETECTAR Y GUARDAR PROYECTO
-// ============================
-let detectedProject = null;
-
-const normalizedMessage = userMessage.trim().toUpperCase();
-
-if (PROJECT_TO_TEAM[normalizedMessage]) {
-  detectedProject = normalizedMessage;
-
-  await updateConversationAttributes(conversationId, {
-    proyecto: detectedProject
-  });
-
-  console.log(`📌 Proyecto detectado y guardado: ${detectedProject}`);
-}
-
-
 // ================================
 // WHATSAPP - TEMPLATE NORMAL
 // ================================
