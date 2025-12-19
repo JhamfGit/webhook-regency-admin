@@ -370,7 +370,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     const conversationId = conversation.id;
     const userPhone = conversation.contact_inbox?.source_id;
-    
+
     if (!userPhone) {
       console.log('⚠️ No se encontró source_id (número de teléfono)');
       return res.status(200).json({ ignored: 'no phone number' });
@@ -382,15 +382,37 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
     if (listResponse) {
       console.log('📱 Respuesta de lista interactiva:', listResponse);
-      userMessage = listResponse;
+      userMessage = listResponse.toLowerCase();
     } else if (content?.trim()) {
       userMessage = content.trim().toLowerCase();
     } else {
       return res.status(200).json({ ignored: 'empty message' });
     }
 
+    // ============================
+    // OBTENER ESTADO Y PROYECTO
+    // ============================
     const currentState = await getConversationState(conversationId);
-    const proyecto = await getConversationProject(conversationId);
+    let proyecto = await getConversationProject(conversationId);
+
+    // ============================
+    // DETECTAR Y GUARDAR PROYECTO
+    // (solo si NO hay estado)
+    // ============================
+    if (!currentState && !proyecto) {
+      const normalizedMessage = userMessage.trim().toUpperCase();
+
+      if (PROJECT_TO_TEAM[normalizedMessage]) {
+        proyecto = normalizedMessage;
+
+        await updateConversationAttributes(conversationId, {
+          proyecto
+        });
+
+        console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
+      }
+    }
+
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
     // ============================
@@ -398,7 +420,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
       console.log(`🛑 Conversación en estado final (${currentState}). No se responde.`);
       return res.status(200).json({ ignored: 'conversation finished' });
     }
-
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
     console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
@@ -408,17 +429,17 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // ============================
     if (!currentState) {
       console.log('🚀 Iniciando flujo automáticamente...');
-      
+
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-        
+
         await sendChatwootMessage(
           conversationId,
           `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'No definido'}`,
           true
         );
-        
+
         return res.json({ ok: true, started: true, proyecto });
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
@@ -431,24 +452,30 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // ============================
     if (!isValidResponse(currentState, userMessage)) {
       console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
-      
+
       let helpMessage = '';
       if (VALID_RESPONSES[currentState]) {
         helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
       } else {
         helpMessage = '⚠️ Espere mientras un asesor lo atiende';
       }
-      
+
       await sendChatwootMessage(conversationId, helpMessage);
       return res.status(200).json({ ok: true, message: 'invalid response' });
     }
 
-    // Guardar respuestas informativas
-    if (currentState === 'seleccion_distancia_transporte' || currentState === 'seleccion_medio_transporte') {
-      const displayValue = VALID_RESPONSES[currentState].find(opt => 
-        opt.toLowerCase() === userMessage.toLowerCase()
-      ) || userMessage;
-      
+    // ============================
+    // GUARDAR RESPUESTAS INFORMATIVAS
+    // ============================
+    if (
+      currentState === 'seleccion_distancia_transporte' ||
+      currentState === 'seleccion_medio_transporte'
+    ) {
+      const displayValue =
+        VALID_RESPONSES[currentState].find(opt =>
+          opt.toLowerCase() === userMessage.toLowerCase()
+        ) || userMessage;
+
       await sendChatwootMessage(
         conversationId,
         `📝 ${TEMPLATE_NAMES[currentState]}: ${displayValue}`,
@@ -467,30 +494,34 @@ app.post('/chatwoot-webhook', async (req, res) => {
         '❌ Debido a que tienes familiares en la empresa, no es posible continuar con el proceso.'
       );
       await updateConversationState(conversationId, 'rechazado');
-      
+
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
-      
+
       return res.json({ ok: true, stopped: true, reason: 'familiares' });
     }
 
     // ❌ Cancelación general
     if (
       userMessage === 'no' &&
-      !['seleccion_familiares_empresa', 'seleccion_distancia_transporte', 
-        'seleccion_medio_transporte', 'seleccion_vinculacion_previa'].includes(currentState)
+      ![
+        'seleccion_familiares_empresa',
+        'seleccion_distancia_transporte',
+        'seleccion_medio_transporte',
+        'seleccion_vinculacion_previa'
+      ].includes(currentState)
     ) {
       await sendChatwootMessage(
         conversationId,
         '❌ Proceso de selección cancelado. Gracias por tu tiempo.'
       );
       await updateConversationState(conversationId, 'cancelado');
-      
+
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
-      
+
       return res.json({ ok: true, stopped: true, reason: 'usuario_cancelo' });
     }
 
@@ -505,13 +536,13 @@ app.post('/chatwoot-webhook', async (req, res) => {
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       await updateConversationState(conversationId, 'completado');
-      
+
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       } else {
         console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
       }
-      
+
       return res.json({ ok: true, completed: true });
     }
 
@@ -534,30 +565,29 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
 
       res.json({ ok: true, nextStep });
-
     } catch (error) {
       console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
-      
+
       await sendChatwootMessage(
         conversationId,
         '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
         false
       );
-      
+
       await updateConversationState(conversationId, 'error');
-      
+
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
-      
+
       res.status(500).json({ error: 'send message failed' });
     }
-
   } catch (error) {
     console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
   }
 });
+
 
 // ================================
 // ENDPOINT PARA INICIAR FLUJO MANUALMENTE
