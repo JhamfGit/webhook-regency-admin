@@ -16,41 +16,41 @@ const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 // MAPEO DE PROYECTOS A EQUIPOS
 // ================================
 const PROJECT_TO_TEAM = {
-  // Admin-tolis
-  'SUMAPAZ': 'admin-tolis',
-  'GICA OP VIAL': 'admin-tolis',
-  'RUTA AL SUR OP VIAL': 'admin-tolis',
-  'VINUS OP VIAL': 'admin-tolis',
+  // Op vial
+  'SUMAPAZ': 'op-vial',
+  'GICA OP VIAL': 'op-vial',
+  'RUTA AL SUR OP VIAL': 'op-vial',
+  'VINUS OP VIAL': 'op-vial',
   
-  // Operación vial
-  'ACCENORTE': 'operacion-vial',
-  'FRIGORINUS VIGILANCIA': 'operacion-vial',
-  'MINEROS LA MARIA VIGILANCIA': 'operacion-vial',
-  'APP GICA (VIGILANCIA)': 'operacion-vial',
-  'DS EL FARO 118 VIGILANCIA': 'operacion-vial',
-  'VINUS - VIGILANCIA': 'operacion-vial',
-  'RUTA AL SUR - VIGILANCIA': 'operacion-vial',
-  'RUTAS DEL VALLE - VIGILANCIA': 'operacion-vial',
-  'ACCENORTE - VIGILANCIA': 'operacion-vial',
-  'CONSORCIO PEAJES 2526 - VIGILANCIA': 'operacion-vial',
+  // PyB-accenorte-iccu-vigilancia
+  'ACCENORTE': 'pyb-accenorte-iccu-vigilancia',
+  'FRIGORINUS VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'MINEROS LA MARIA VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'APP GICA (VIGILANCIA)': 'pyb-accenorte-iccu-vigilancia',
+  'DS EL FARO 118 VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'VINUS - VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'RUTA AL SUR - VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'RUTAS DEL VALLE - VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'ACCENORTE - VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
+  'CONSORCIO PEAJES 2526 - VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
   
-  // PyB Accenorte Vigilancia
-  'CONSORCIO PEAJES 2526 - PLANTA': 'pyb-accenorte-vigilancia',
-  'RUTA AL SUR - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
-  'RUTAS DEL VALLE - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
-  'GICA - RECOLECTOR TEMPORADA': 'pyb-accenorte-vigilancia',
-  'CONSORCIO PEAJES 2526 - CANGUROS': 'pyb-accenorte-vigilancia',
+  // planta temporal-canguro
+  'CONSORCIO PEAJES 2526 - PLANTA': 'planta-temporal-canguro',
+  'RUTA AL SUR - RECOLECTOR TEMPORADA': 'planta-temporal-canguro',
+  'RUTAS DEL VALLE - RECOLECTOR TEMPORADA': 'planta-temporal-canguro',
+  'GICA - RECOLECTOR TEMPORADA': 'planta-temporal-canguro',
+  'CONSORCIO PEAJES 2526 - CANGUROS': 'planta-temporal-canguro',
   
-  // PyB Planta
+  // pyb-planta
   'RUTA AL SUR PLANTA': 'pyb-planta',
   'RUTAS DEL VALLE PLANTA': 'pyb-planta',
   'RUTAS DEL VALLE': 'pyb-planta',
   'GICA PLANTA': 'pyb-planta',
   'VINUS PLANTA': 'pyb-planta',
   
-  // PyB Recolector Canguro
-  'ADMINISTRACION': 'pyb-recolector-canguro',
-  'TOLIS': 'pyb-recolector-canguro'
+  // Admin-tolis
+  'ADMINISTRACION': 'admin-tolis',
+  'TOLIS': 'admin-tolis'
 };
 
 // ================================
