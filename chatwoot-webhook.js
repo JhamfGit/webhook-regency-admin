@@ -50,7 +50,11 @@ const PROJECT_TO_TEAM = {
   
   // Admin-tolis
   'ADMINISTRACION': 'admin-tolis',
-  'TOLIS': 'admin-tolis'
+  'TOLIS': 'admin-tolis',
+  
+  // Agregar más variantes comunes
+  'GICA (VIGILANCIA)': 'pyb-accenorte-iccu-vigilancia',
+  'VINUS VIGILANCIA': 'pyb-accenorte-iccu-vigilancia'
 };
 
 // ================================
@@ -395,23 +399,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const currentState = await getConversationState(conversationId);
     let proyecto = await getConversationProject(conversationId);
 
-    // ============================
-    // DETECTAR Y GUARDAR PROYECTO
-    // (solo si NO hay estado)
-    // ============================
-    if (!currentState && !proyecto) {
-      const normalizedMessage = userMessage.trim().toUpperCase();
-
-      if (PROJECT_TO_TEAM[normalizedMessage]) {
-        proyecto = normalizedMessage;
-
-        await updateConversationAttributes(conversationId, {
-          proyecto
-        });
-
-        console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
-      }
-    }
+    console.log(`📋 Proyecto desde atributos: ${proyecto || 'no definido'}`);
 
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
@@ -422,7 +410,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
-    console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
 
     // ============================
     // INICIAR FLUJO AUTOMÁTICAMENTE
