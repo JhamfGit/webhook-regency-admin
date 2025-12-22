@@ -13,7 +13,7 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
 // ================================
-// MENSAJE FINAL DE ÉXITO (ÚNICO)
+// MENSAJE FINAL ÚNICO (CONTROL)
 // ================================
 const FINAL_SUCCESS_MESSAGE =
   'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.';
@@ -67,20 +67,6 @@ const TEMPLATE_FLOW = {
   seleccion_vinculacion_previa: 'fin'
 };
 
-const TEMPLATE_NAMES = {
-  seleccion_certificado_bachiller: 'Certificado de bachiller',
-  seleccion_ubicacion_desplazamiento: 'Ubicación y desplazamiento',
-  seleccion_familiares_empresa: 'Familiares en la empresa',
-  seleccion_distancia_transporte: 'Distancia al trabajo',
-  seleccion_medio_transporte: 'Medio de transporte',
-  seleccion_vinculacion_previa: 'Vinculación previa'
-};
-
-const VALID_RESPONSES = {
-  seleccion_distancia_transporte: ['menos_15', '15_30', '30_60', 'mas_60'],
-  seleccion_medio_transporte: ['moto', 'carro', 'publico', 'bicicleta', 'pie']
-};
-
 // ================================
 // FUNCIONES CHATWOOT
 // ================================
@@ -93,7 +79,8 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
 }
 
 async function assignLabelByProject(conversationId, proyecto) {
-  const team = PROJECT_TO_TEAM[proyecto?.trim().toUpperCase()];
+  const normalized = proyecto?.trim().toUpperCase();
+  const team = PROJECT_TO_TEAM[normalized];
   if (!team) return;
 
   await axios.post(
@@ -114,23 +101,25 @@ async function assignLabelByProject(conversationId, proyecto) {
 // ================================
 app.post('/chatwoot-webhook', async (req, res) => {
   try {
-    const { event, message_type, conversation } = req.body;
+    const { event, message_type, conversation, content } = req.body;
 
     if (event !== 'message_created' || message_type !== 'incoming') {
       return res.status(200).json({ ignored: true });
     }
 
     const conversationId = conversation.id;
-    const proyecto = conversation.custom_attributes?.proyecto;
+    const userPhone = conversation.contact_inbox?.source_id;
+    const attrs = conversation.custom_attributes || {};
+    const currentState = attrs.template_state;
+    const proyecto = attrs.proyecto;
 
-    const currentState = conversation.custom_attributes?.template_state;
-    const nextStep = TEMPLATE_FLOW[currentState];
-
-    if (nextStep === 'fin') {
-      // 👉 MENSAJE FINAL
+    // ============================
+    // FINAL DEL FLUJO
+    // ============================
+    if (TEMPLATE_FLOW[currentState] === 'fin') {
       await sendChatwootMessage(conversationId, FINAL_SUCCESS_MESSAGE);
-      
-      // 👉 ASIGNAR ETIQUETA SOLO AQUÍ
+
+      // ✅ ÚNICO LUGAR DONDE SE ASIGNA LA ETIQUETA
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       }
@@ -138,7 +127,11 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.json({ ok: true, completed: true });
     }
 
+    // ============================
+    // CONTINUAR FLUJO NORMAL
+    // ============================
     res.json({ ok: true });
+
   } catch (error) {
     console.error('❌ ERROR GENERAL:', error.message);
     res.status(500).json({ error: 'Webhook error' });
