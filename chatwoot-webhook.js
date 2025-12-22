@@ -22,7 +22,7 @@ const PROJECT_TO_TEAM = {
   'RUTA AL SUR OP VIAL': 'op-vial',
   'VINUS OP VIAL': 'op-vial',
   
-  // PyB-accenorte-iccu-vigilancia
+  // Pyb-accenorte-iccu-vigilancia
   'ACCENORTE': 'pyb-accenorte-iccu-vigilancia',
   'FRIGORINUS VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
   'MINEROS LA MARIA VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
@@ -44,17 +44,12 @@ const PROJECT_TO_TEAM = {
   // pyb-planta
   'RUTA AL SUR PLANTA': 'pyb-planta',
   'RUTAS DEL VALLE PLANTA': 'pyb-planta',
-  'RUTAS DEL VALLE': 'pyb-planta',
   'GICA PLANTA': 'pyb-planta',
   'VINUS PLANTA': 'pyb-planta',
   
   // Admin-tolis
   'ADMINISTRACION': 'admin-tolis',
-  'TOLIS': 'admin-tolis',
-  
-  // Agregar más variantes comunes
-  'GICA (VIGILANCIA)': 'pyb-accenorte-iccu-vigilancia',
-  'VINUS VIGILANCIA': 'pyb-accenorte-iccu-vigilancia'
+  'TOLIS': 'admin-tolis'
 };
 
 // ================================
