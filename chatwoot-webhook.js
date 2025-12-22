@@ -22,7 +22,7 @@ const PROJECT_TO_TEAM = {
   'RUTA AL SUR OP VIAL': 'op-vial',
   'VINUS OP VIAL': 'op-vial',
   
-  // Pyb-accenorte-iccu-vigilancia
+  // PyB-accenorte-iccu-vigilancia
   'ACCENORTE': 'pyb-accenorte-iccu-vigilancia',
   'FRIGORINUS VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
   'MINEROS LA MARIA VIGILANCIA': 'pyb-accenorte-iccu-vigilancia',
@@ -44,6 +44,7 @@ const PROJECT_TO_TEAM = {
   // pyb-planta
   'RUTA AL SUR PLANTA': 'pyb-planta',
   'RUTAS DEL VALLE PLANTA': 'pyb-planta',
+  'RUTAS DEL VALLE': 'pyb-planta',
   'GICA PLANTA': 'pyb-planta',
   'VINUS PLANTA': 'pyb-planta',
   
@@ -394,7 +395,23 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const currentState = await getConversationState(conversationId);
     let proyecto = await getConversationProject(conversationId);
 
-    console.log(`📋 Proyecto desde atributos: ${proyecto || 'no definido'}`);
+    // ============================
+    // DETECTAR Y GUARDAR PROYECTO
+    // (solo si NO hay estado)
+    // ============================
+    if (!currentState && !proyecto) {
+      const normalizedMessage = userMessage.trim().toUpperCase();
+
+      if (PROJECT_TO_TEAM[normalizedMessage]) {
+        proyecto = normalizedMessage;
+
+        await updateConversationAttributes(conversationId, {
+          proyecto
+        });
+
+        console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
+      }
+    }
 
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
@@ -405,6 +422,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     console.log(`📍 Estado: ${currentState || 'sin estado'} | Respuesta: "${userMessage}"`);
+    console.log(`📋 Proyecto almacenado: ${proyecto || 'no definido'}`);
 
     // ============================
     // INICIAR FLUJO AUTOMÁTICAMENTE
