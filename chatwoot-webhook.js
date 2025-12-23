@@ -405,22 +405,18 @@ app.post('/chatwoot-webhook', async (req, res) => {
     let proyecto = await getConversationProject(conversationId);
 
     // ============================
-    // DETECTAR Y GUARDAR PROYECTO
-    // (solo si NO hay estado)
+    // DETECTAR Y GUARDAR PROYECTO (SIEMPRE)
     // ============================
-    if (!currentState && !proyecto) {
-      const normalizedMessage = userMessage.trim().toUpperCase();
-
-      if (PROJECT_TO_TEAM[normalizedMessage]) {
-        proyecto = normalizedMessage;
-
-        await updateConversationAttributes(conversationId, {
-          proyecto
-        });
-
-        console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
-      }
+    const normalizedMessage = userMessage.trim().toUpperCase();
+    
+    if (!proyecto && PROJECT_TO_TEAM[normalizedMessage]) {
+      proyecto = normalizedMessage;
+    
+      await updateConversationAttributes(conversationId, { proyecto });
+    
+      console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
     }
+    
 
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
