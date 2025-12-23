@@ -95,15 +95,6 @@ function getCachedData(key) {
   return null;
 }
 
-async function getProyectoFresh(conversationId) {
-  const res = await axios.get(
-    `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
-    { headers: { api_access_token: API_KEY } }
-  );
-  return res.data.custom_attributes?.proyecto || null;
-}
-
-
 function setCachedData(key, data) {
   conversationCache.set(key, { data, timestamp: Date.now() });
 }
@@ -402,21 +393,25 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // OBTENER ESTADO Y PROYECTO
     // ============================
     const currentState = await getConversationState(conversationId);
-    let proyecto = conversation.custom_attributes?.proyecto || null;
+    let proyecto = await getConversationProject(conversationId);
 
     // ============================
-    // DETECTAR Y GUARDAR PROYECTO (SIEMPRE)
+    // DETECTAR Y GUARDAR PROYECTO
+    // (solo si NO hay estado)
     // ============================
-    const normalizedMessage = userMessage.trim().toUpperCase();
-    
-    if (!proyecto && PROJECT_TO_TEAM[normalizedMessage]) {
-      proyecto = normalizedMessage;
-    
-      await updateConversationAttributes(conversationId, { proyecto });
-    
-      console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
+    if (!currentState && !proyecto) {
+      const normalizedMessage = userMessage.trim().toUpperCase();
+
+      if (PROJECT_TO_TEAM[normalizedMessage]) {
+        proyecto = normalizedMessage;
+
+        await updateConversationAttributes(conversationId, {
+          proyecto
+        });
+
+        console.log(`📌 Proyecto detectado y guardado: ${proyecto}`);
+      }
     }
-    
 
     // ============================
     // BLOQUEAR CONVERSACIONES FINALIZADAS
@@ -500,9 +495,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'rechazado');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
+      console.log('🚫 Proceso rechazado por familiares. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'familiares' });
     }
@@ -523,9 +517,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'cancelado');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
+      console.log('🚫 Proceso cancelado por usuario. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'usuario_cancelo' });
     }
@@ -536,25 +529,30 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const nextStep = TEMPLATE_FLOW[currentState];
 
     if (nextStep === 'fin') {
+      // ✅ MENSAJE DE CONFIRMACIÓN
       await sendChatwootMessage(
         conversationId,
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
-    
+      
+      // ✅ ACTUALIZAR ESTADO A COMPLETADO
       await updateConversationState(conversationId, 'completado');
-    
-      const proyecto = await getConversationProject(conversationId);
-    
+
+      // ✅ AHORA SÍ: ETIQUETAR LA CONVERSACIÓN
       if (proyecto) {
+        console.log('🏷️ Proceso completado exitosamente. Procediendo a etiquetar...');
         await assignLabelByProject(conversationId, proyecto);
       } else {
-        console.log('⚠️ No hay proyecto, no se asignó equipo');
+        console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
+        await sendChatwootMessage(
+          conversationId,
+          '⚠️ No se pudo asignar etiqueta: proyecto no definido',
+          true
+        );
       }
-    
-      return res.json({ ok: true });
+
+      return res.json({ ok: true, completed: true, proyecto });
     }
-
-
 
     // Enviar siguiente mensaje
     try {
@@ -586,9 +584,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
       await updateConversationState(conversationId, 'error');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA EN ERRORES TÉCNICOS
+      console.log('🚫 Error técnico. Sin etiquetado.');
 
       res.status(500).json({ error: 'send message failed' });
     }
