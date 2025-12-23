@@ -495,9 +495,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'rechazado');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
+      console.log('🚫 Proceso rechazado por familiares. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'familiares' });
     }
@@ -518,9 +517,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'cancelado');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
+      console.log('🚫 Proceso cancelado por usuario. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'usuario_cancelo' });
     }
@@ -531,19 +529,29 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const nextStep = TEMPLATE_FLOW[currentState];
 
     if (nextStep === 'fin') {
+      // ✅ MENSAJE DE CONFIRMACIÓN
       await sendChatwootMessage(
         conversationId,
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
+      
+      // ✅ ACTUALIZAR ESTADO A COMPLETADO
       await updateConversationState(conversationId, 'completado');
 
+      // ✅ AHORA SÍ: ETIQUETAR LA CONVERSACIÓN
       if (proyecto) {
+        console.log('🏷️ Proceso completado exitosamente. Procediendo a etiquetar...');
         await assignLabelByProject(conversationId, proyecto);
       } else {
         console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
+        await sendChatwootMessage(
+          conversationId,
+          '⚠️ No se pudo asignar etiqueta: proyecto no definido',
+          true
+        );
       }
 
-      return res.json({ ok: true, completed: true });
+      return res.json({ ok: true, completed: true, proyecto });
     }
 
     // Enviar siguiente mensaje
@@ -576,9 +584,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
       await updateConversationState(conversationId, 'error');
 
-      if (proyecto) {
-        await assignLabelByProject(conversationId, proyecto);
-      }
+      // NO SE ETIQUETA EN ERRORES TÉCNICOS
+      console.log('🚫 Error técnico. Sin etiquetado.');
 
       res.status(500).json({ error: 'send message failed' });
     }
