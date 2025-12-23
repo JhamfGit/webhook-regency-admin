@@ -95,6 +95,15 @@ function getCachedData(key) {
   return null;
 }
 
+async function getProyectoFresh(conversationId) {
+  const res = await axios.get(
+    `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}`,
+    { headers: { api_access_token: API_KEY } }
+  );
+  return res.data.custom_attributes?.proyecto || null;
+}
+
+
 function setCachedData(key, data) {
   conversationCache.set(key, { data, timestamp: Date.now() });
 }
@@ -535,16 +544,20 @@ app.post('/chatwoot-webhook', async (req, res) => {
         conversationId,
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
+    
       await updateConversationState(conversationId, 'completado');
-
+    
+      const proyecto = await getProyectoFresh(conversationId);
+    
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
       } else {
-        console.log('⚠️ No hay proyecto definido, no se asignó etiqueta');
+        console.log('⚠️ No hay proyecto, no se asignó equipo');
       }
-
-      return res.json({ ok: true, completed: true });
+    
+      return res.json({ ok: true });
     }
+
 
     // Enviar siguiente mensaje
     try {
