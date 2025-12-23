@@ -475,20 +475,27 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     // ============================
-    // INICIAR FLUJO SOLO SI HAY PROYECTO
+    // INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
     // ============================
     if (!currentState) {
       console.log('🔍 Sin estado actual. Verificando si hay proyecto...');
       
       if (!proyecto) {
-        console.log('⏳ No hay proyecto aún. Esperando que n8n lo configure...');
-        return res.status(200).json({ 
-          ignored: 'waiting for project', 
-          message: 'Proyecto aún no configurado por n8n' 
-        });
+        console.log('⏳ No hay proyecto. Esperando 2 segundos y verificando de nuevo...');
+        
+        // Esperar 2 segundos para que n8n configure el proyecto
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Verificar de nuevo
+        proyecto = await getConversationProject(conversationId);
+        console.log(`🔄 Proyecto después de espera: ${proyecto || 'aún no definido'}`);
+        
+        if (!proyecto) {
+          console.log('⚠️ Proyecto no configurado después de espera. Iniciando sin proyecto.');
+        }
       }
 
-      console.log(`🚀 Iniciando flujo automáticamente con proyecto: ${proyecto}`);
+      console.log(`🚀 Iniciando flujo automáticamente ${proyecto ? `con proyecto: ${proyecto}` : 'sin proyecto'}`);
 
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
