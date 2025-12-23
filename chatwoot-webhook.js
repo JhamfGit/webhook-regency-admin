@@ -82,42 +82,6 @@ const VALID_RESPONSES = {
 };
 
 // ================================
-// CONTROL DE HORARIO
-// ================================
-function isBusinessHours() {
-  const now = new Date();
-  const bogotaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
-  const day = bogotaTime.getDay();
-  const hour = bogotaTime.getHours();
-
-  const isWeekday = day >= 1 && day <= 5;
-  const isWorkingHours = hour >= 8 && hour < 17;
-
-  console.log(`🕐 Hora actual en Bogotá: ${bogotaTime.toLocaleString('es-CO')} (Día: ${day}, Hora: ${hour})`);
-
-  if (isWeekday && isWorkingHours) {
-    console.log('✅ Lunes a Viernes - Dentro del horario (8 AM - 5 PM)');
-    return true;
-  } else {
-    console.log('⏸️ Fuera del horario laboral');
-    return false;
-  }
-}
-
-// ================================
-// CONTROL DE CONVERSACIONES PROCESADAS
-// ================================
-const processedConversations = new Set();
-
-function isConversationProcessed(conversationId) {
-  return processedConversations.has(conversationId);
-}
-
-function markConversationAsProcessed(conversationId) {
-  processedConversations.add(conversationId);
-}
-
-// ================================
 // CACHE SIMPLE PARA REDUCIR LLAMADAS
 // ================================
 const conversationCache = new Map();
@@ -208,22 +172,6 @@ async function sendChatwootMessage(conversationId, content, isPrivate = false) {
       timeout: 5000
     }
   );
-}
-
-async function assignConversation(conversationId, assigneeId) {
-  try {
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/assignments`,
-      { assignee_id: assigneeId },
-      {
-        headers: { api_access_token: API_KEY },
-        timeout: 5000
-      }
-    );
-    console.log(`🎯 Conversación ${conversationId} asignada exitosamente.`);
-  } catch (error) {
-    console.error('❌ Error asignando conversación:', error.message);
-  }
 }
 
 async function assignLabelByProject(conversationId, proyecto) {
@@ -415,14 +363,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
   try {
     const { event, message_type, conversation, content, additional_attributes } = req.body;
 
-    // Verificar horario laboral
-    if (!isBusinessHours()) {
-      return res.status(200).json({ ignored: 'outside business hours' });
-    }
-
-    // Logs del evento recibido
-    console.log(`📨 Evento recibido: ${event}, tipo: ${message_type}`);
-
     // Solo procesar mensajes entrantes
     if (event !== 'message_created' || message_type !== 'incoming') {
       return res.status(200).json({ ignored: 'not incoming message' });
@@ -434,12 +374,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     if (!userPhone) {
       console.log('⚠️ No se encontró source_id (número de teléfono)');
       return res.status(200).json({ ignored: 'no phone number' });
-    }
-
-    // Verificar si la conversación ya fue procesada
-    if (isConversationProcessed(conversationId)) {
-      console.log(`🛑 Conversación ${conversationId} ya procesada. Ignorando.`);
-      return res.status(200).json({ ignored: 'already processed' });
     }
 
     // Extraer respuesta de lista interactiva si existe
@@ -484,7 +418,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // ============================
     if (['completado', 'rechazado', 'cancelado', 'error'].includes(currentState)) {
       console.log(`🛑 Conversación en estado final (${currentState}). No se responde.`);
-      markConversationAsProcessed(conversationId);
       return res.status(200).json({ ignored: 'conversation finished' });
     }
 
@@ -500,11 +433,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-
-        // Asignar conversación si hay assignee_id disponible
-        if (conversation.meta?.assignee) {
-          await assignConversation(conversationId, conversation.meta.assignee.id);
-        }
 
         await sendChatwootMessage(
           conversationId,
@@ -567,8 +495,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'rechazado');
 
-      // ⚠️ NO SE ETIQUETA AQUÍ - Solo se marca como procesada
-      markConversationAsProcessed(conversationId);
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
       console.log('🚫 Proceso rechazado por familiares. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'familiares' });
@@ -590,8 +517,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
       );
       await updateConversationState(conversationId, 'cancelado');
 
-      // ⚠️ NO SE ETIQUETA AQUÍ - Solo se marca como procesada
-      markConversationAsProcessed(conversationId);
+      // NO SE ETIQUETA AQUÍ - Solo se actualiza el estado
       console.log('🚫 Proceso cancelado por usuario. Sin etiquetado.');
 
       return res.json({ ok: true, stopped: true, reason: 'usuario_cancelo' });
@@ -603,16 +529,16 @@ app.post('/chatwoot-webhook', async (req, res) => {
     const nextStep = TEMPLATE_FLOW[currentState];
 
     if (nextStep === 'fin') {
-      // ✅ PASO 1: MENSAJE DE CONFIRMACIÓN
+      // ✅ MENSAJE DE CONFIRMACIÓN
       await sendChatwootMessage(
         conversationId,
         'Confirmamos que has superado esta fase inicial. Tu candidatura sigue activa y pasará a la siguiente etapa del proceso de selección.'
       );
       
-      // ✅ PASO 2: ACTUALIZAR ESTADO A COMPLETADO
+      // ✅ ACTUALIZAR ESTADO A COMPLETADO
       await updateConversationState(conversationId, 'completado');
 
-      // ✅ PASO 3: AHORA SÍ - ETIQUETAR LA CONVERSACIÓN
+      // ✅ AHORA SÍ: ETIQUETAR LA CONVERSACIÓN
       if (proyecto) {
         console.log('🏷️ Proceso completado exitosamente. Procediendo a etiquetar...');
         await assignLabelByProject(conversationId, proyecto);
@@ -624,9 +550,6 @@ app.post('/chatwoot-webhook', async (req, res) => {
           true
         );
       }
-
-      // ✅ PASO 4: MARCAR COMO PROCESADA
-      markConversationAsProcessed(conversationId);
 
       return res.json({ ok: true, completed: true, proyecto });
     }
@@ -661,8 +584,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
       await updateConversationState(conversationId, 'error');
 
-      // ⚠️ NO SE ETIQUETA EN ERRORES TÉCNICOS
-      markConversationAsProcessed(conversationId);
+      // NO SE ETIQUETA EN ERRORES TÉCNICOS
       console.log('🚫 Error técnico. Sin etiquetado.');
 
       res.status(500).json({ error: 'send message failed' });
@@ -672,6 +594,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     res.status(500).json({ error: 'Webhook error' });
   }
 });
+
 
 // ================================
 // ENDPOINT PARA INICIAR FLUJO MANUALMENTE
