@@ -402,7 +402,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // OBTENER ESTADO Y PROYECTO
     // ============================
     const currentState = await getConversationState(conversationId);
-    let proyecto = await getConversationProject(conversationId);
+    let proyecto = conversation.custom_attributes?.proyecto || null;
 
     // ============================
     // DETECTAR Y GUARDAR PROYECTO (SIEMPRE)
@@ -543,7 +543,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     
       await updateConversationState(conversationId, 'completado');
     
-      const proyecto = await getProyectoFresh(conversationId);
+      const proyecto = conversation.custom_attributes?.proyecto || null;
     
       if (proyecto) {
         await assignLabelByProject(conversationId, proyecto);
