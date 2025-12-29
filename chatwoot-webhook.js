@@ -475,79 +475,89 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     // ============================
-    // INICIAR FLUJO CON VALIDACIÓN DE PROYECTO
+    // INICIAR FLUJO (CON MENSAJE PREVIO)
     // ============================
     if (!currentState) {
-      console.log('🔍 Sin estado actual. Esperando sincronización de proyecto...');
+      console.log('🔍 Sin estado actual. Verificando si ya se está procesando...');
       
-      let proyecto = null;
-      let intentos = 0;
-      const MAX_INTENTOS = 5;
-      const DELAY = 1000; // 1 segundo entre intentos
-      
-      // Intentar obtener el proyecto con reintentos
-      while (intentos < MAX_INTENTOS && !proyecto) {
-        intentos++;
-        console.log(`🔄 Intento ${intentos}/${MAX_INTENTOS} - Buscando proyecto...`);
-        
-        // Invalidar cache y obtener datos frescos
-        const cacheKey = `attrs_${conversationId}`;
-        conversationCache.delete(cacheKey);
-        
-        proyecto = await getConversationProject(conversationId);
-        
-        if (proyecto) {
-          console.log(`✅ Proyecto encontrado: ${proyecto}`);
-          break;
-        }
-        
-        if (intentos < MAX_INTENTOS) {
-          await new Promise(resolve => setTimeout(resolve, DELAY));
-        }
+      // ⚠️ BLOQUEO INMEDIATO
+      try {
+        await updateConversationState(conversationId, 'iniciando');
+        console.log('🔒 Estado cambiado a "iniciando" para bloquear duplicados');
+      } catch (error) {
+        console.log('⚠️ No se pudo actualizar estado inicial, posible duplicado');
+        return res.status(200).json({ ignored: 'already processing' });
       }
       
-      // Si después de todos los intentos no hay proyecto, decidir qué hacer
-      if (!proyecto) {
-        console.log('⚠️ No se pudo obtener el proyecto después de varios intentos.');
-        
-        // OPCIÓN A: Continuar sin proyecto
-        await sendChatwootMessage(
-          conversationId,
-          '⚠️ Iniciando sin proyecto asignado. Se asignará manualmente.',
-          true
-        );
-        
-        // OPCIÓN B: Detener el proceso (comentar OPCIÓN A y descomentar esto)
-        /*
-        await sendChatwootMessage(
-          conversationId,
-          '❌ Error: No se pudo sincronizar el proyecto. Por favor contacta a soporte.',
-          false
-        );
-        return res.status(200).json({ error: 'proyecto no sincronizado' });
-        */
+      // Pequeña pausa
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Verificar de nuevo
+      const stateCheck = await getConversationState(conversationId);
+      if (stateCheck && stateCheck !== 'iniciando') {
+        console.log(`🛑 Otro proceso ya avanzó el estado a: ${stateCheck}`);
+        return res.status(200).json({ ignored: 'already started by another webhook' });
       }
       
-      // Continuar con el flujo
-      console.log(`🚀 Iniciando flujo con proyecto: ${proyecto || 'Sin asignar'}`);
+      console.log('📝 Enviando mensaje de bienvenida...');
       
       try {
+        // ✅ PASO 1: Enviar mensaje de texto informativo
+        await sendChatwootMessage(
+          conversationId,
+          'A continuación se le harán unas preguntas relevantes para hacer el primer filtro del proceso de selección. Por favor responda con honestidad.',
+          false // mensaje público para el usuario
+        );
+        
+        // ✅ PASO 2: Esperar 2 segundos para que n8n sincronice
+        console.log('⏳ Esperando sincronización de proyecto (2 segundos)...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // ✅ PASO 3: Obtener proyecto (debería estar ya)
+        conversationCache.delete(`attrs_${conversationId}`);
+        const proyecto = await getConversationProject(conversationId);
+        
+        if (proyecto) {
+          console.log(`✅ Proyecto sincronizado: ${proyecto}`);
+        } else {
+          console.log('⚠️ Proyecto aún no sincronizado, continuando de todos modos');
+        }
+        
+        // ✅ PASO 4: Enviar primera plantilla
+        console.log('📤 Enviando plantilla: Certificado de bachiller');
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
+        
+        // ✅ PASO 5: Actualizar estado real
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
         
+        // ✅ PASO 6: Asignar si hay assignee
         if (conversation.meta?.assignee) {
           await assignConversation(conversationId, conversation.meta.assignee.id);
         }
         
+        // ✅ PASO 7: Nota interna
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'Sin asignar'}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'Pendiente de sincronizar'}`,
           true
         );
         
-        return res.json({ ok: true, started: true, proyecto });
+        // ✅ PASO 8: Marcar como procesada
+        markConversationAsProcessed(conversationId);
+        
+        return res.json({ ok: true, started: true, proyecto: proyecto || 'pendiente' });
+        
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
+        
+        await updateConversationState(conversationId, 'error_inicio');
+        
+        await sendChatwootMessage(
+          conversationId,
+          '❌ Ocurrió un error al iniciar el proceso. Por favor contacta a soporte.',
+          false
+        );
+        
         return res.status(500).json({ error: 'failed to start flow' });
       }
     }
