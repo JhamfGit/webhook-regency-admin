@@ -745,4 +745,91 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
   } catch (error) {
     console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
-    res.status(500).json({
+    res.status(500).json({ error: 'Webhook error' });
+  }
+});
+
+// ================================
+// ENDPOINT PARA INICIAR FLUJO MANUALMENTE
+// ================================
+app.post('/start-flow', async (req, res) => {
+  try {
+    const { phone, proyecto } = req.body;
+    
+    if (!phone) {
+      return res.status(400).json({ error: 'phone is required' });
+    }
+
+    // Buscar conversación activa por teléfono
+    const conversations = await axios.get(
+      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
+      { 
+        headers: { api_access_token: API_KEY },
+        params: { status: 'open' }
+      }
+    );
+
+    const conversation = conversations.data.find(
+      c => c.contact_inbox?.source_id === phone
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'conversation not found' });
+    }
+
+    const conversationId = conversation.id;
+
+    // Actualizar proyecto si se proporciona
+    if (proyecto) {
+      await updateConversationAttributes(conversationId, { proyecto });
+    }
+
+    // Enviar mensaje de bienvenida
+    await sendChatwootMessage(
+      conversationId,
+      'A continuación se le harán unas preguntas relevantes para hacer el primer filtro del proceso de selección. Por favor responda con honestidad.',
+      false
+    );
+
+    // Esperar 2 segundos
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Iniciar flujo
+    await sendWhatsAppTemplate(phone, 'seleccion_certificado_bachiller');
+    await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
+    
+    await sendChatwootMessage(
+      conversationId,
+      `✅ Flujo iniciado manualmente\n📋 Proyecto: ${proyecto || 'No especificado'}`,
+      true
+    );
+
+    res.json({ ok: true, conversationId, proyecto });
+
+  } catch (error) {
+    console.error('❌ Error en start-flow:', error.message);
+    res.status(500).json({ error: 'failed to start flow' });
+  }
+});
+
+// ================================
+// LIMPIEZA DE CACHE PERIÓDICA
+// ================================
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of conversationCache.entries()) {
+    if (now - value.timestamp > CACHE_TTL) {
+      conversationCache.delete(key);
+    }
+  }
+}, 60000); // Cada minuto
+
+// ================================
+// SERVER
+// ================================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Webhook listening on port ${PORT}`);
+  console.log(`📋 Flujo configurado con ${Object.keys(TEMPLATE_FLOW).length} estados`);
+  console.log(`🏷️ Proyectos mapeados: ${Object.keys(PROJECT_TO_TEAM).length}`);
+});
