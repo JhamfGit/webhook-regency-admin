@@ -475,43 +475,76 @@ app.post('/chatwoot-webhook', async (req, res) => {
     }
 
     // ============================
-    // INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
+    // INICIAR FLUJO CON VALIDACIÓN DE PROYECTO
     // ============================
     if (!currentState) {
-      console.log('🔍 Sin estado actual. Verificando si hay proyecto...');
+      console.log('🔍 Sin estado actual. Esperando sincronización de proyecto...');
       
-      if (!proyecto) {
-        console.log('⏳ No hay proyecto. Esperando 2 segundos y verificando de nuevo...');
+      let proyecto = null;
+      let intentos = 0;
+      const MAX_INTENTOS = 5;
+      const DELAY = 1000; // 1 segundo entre intentos
+      
+      // Intentar obtener el proyecto con reintentos
+      while (intentos < MAX_INTENTOS && !proyecto) {
+        intentos++;
+        console.log(`🔄 Intento ${intentos}/${MAX_INTENTOS} - Buscando proyecto...`);
         
-        // Esperar 2 segundos para que n8n configure el proyecto
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Invalidar cache y obtener datos frescos
+        const cacheKey = `attrs_${conversationId}`;
+        conversationCache.delete(cacheKey);
         
-        // Verificar de nuevo
         proyecto = await getConversationProject(conversationId);
-        console.log(`🔄 Proyecto después de espera: ${proyecto || 'aún no definido'}`);
         
-        if (!proyecto) {
-          console.log('⚠️ Proyecto no configurado después de espera. Iniciando sin proyecto.');
+        if (proyecto) {
+          console.log(`✅ Proyecto encontrado: ${proyecto}`);
+          break;
+        }
+        
+        if (intentos < MAX_INTENTOS) {
+          await new Promise(resolve => setTimeout(resolve, DELAY));
         }
       }
-
-      console.log(`🚀 Iniciando flujo automáticamente ${proyecto ? `con proyecto: ${proyecto}` : 'sin proyecto'}`);
-
+      
+      // Si después de todos los intentos no hay proyecto, decidir qué hacer
+      if (!proyecto) {
+        console.log('⚠️ No se pudo obtener el proyecto después de varios intentos.');
+        
+        // OPCIÓN A: Continuar sin proyecto
+        await sendChatwootMessage(
+          conversationId,
+          '⚠️ Iniciando sin proyecto asignado. Se asignará manualmente.',
+          true
+        );
+        
+        // OPCIÓN B: Detener el proceso (comentar OPCIÓN A y descomentar esto)
+        /*
+        await sendChatwootMessage(
+          conversationId,
+          '❌ Error: No se pudo sincronizar el proyecto. Por favor contacta a soporte.',
+          false
+        );
+        return res.status(200).json({ error: 'proyecto no sincronizado' });
+        */
+      }
+      
+      // Continuar con el flujo
+      console.log(`🚀 Iniciando flujo con proyecto: ${proyecto || 'Sin asignar'}`);
+      
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-
-        // Asignar conversación si hay assignee_id disponible
+        
         if (conversation.meta?.assignee) {
           await assignConversation(conversationId, conversation.meta.assignee.id);
         }
-
+        
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'Sin asignar'}`,
           true
         );
-
+        
         return res.json({ ok: true, started: true, proyecto });
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
