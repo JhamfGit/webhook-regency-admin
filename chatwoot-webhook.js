@@ -484,7 +484,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
         console.log('⏳ No hay proyecto. Esperando 2 segundos y verificando de nuevo...');
         
         // Esperar 2 segundos para que n8n configure el proyecto
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 10000));
         
         // Verificar de nuevo
         proyecto = await getConversationProject(conversationId);
