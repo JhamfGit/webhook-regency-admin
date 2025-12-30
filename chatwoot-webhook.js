@@ -614,7 +614,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     
       // ✅ PASO 3: ESPERAR 3 SEGUNDOS para que n8n sincronice el proyecto
       console.log('⏳ Esperando 3 segundos para sincronización de proyecto...');
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     
       // ✅ PASO 4: OBTENER PROYECTO FRESCO (FORZAR LECTURA SIN CACHE)
       const cacheKey = `attrs_${conversationId}`;
