@@ -50,7 +50,7 @@ const PROJECT_TO_TEAM = {
   
   // Admin-tolis
   'ADMINISTRACION': 'admin-tolis',
-  'TOLIS': 'admin-tolis'
+  'TOLIS': 'admin-tolis',
   'null': 'sin-proyecto'
 };
 
