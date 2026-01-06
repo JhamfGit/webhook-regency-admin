@@ -603,7 +603,7 @@ app.post('/chatwoot-webhook', async (req, res) => {
     // ============================
     const nextStep = TEMPLATE_FLOW[currentState];
 
-    if (nextStep === 'fin') {
+   if (nextStep === 'fin') {
       // ✅ PASO 1: MENSAJE DE CONFIRMACIÓN
       await sendChatwootMessage(
         conversationId,
@@ -613,8 +613,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       // ✅ PASO 2: ACTUALIZAR ESTADO A COMPLETADO
       await updateConversationState(conversationId, 'completado');
     
-      // ✅ PASO 3: ESPERAR 10 SEGUNDOS para que n8n sincronice el proyecto
-      console.log('⏳ Esperando 10 segundos para sincronización de proyecto...');
+      // ✅ PASO 3: ESPERAR 3 SEGUNDOS para que n8n sincronice el proyecto
+      console.log('⏳ Esperando 3 segundos para sincronización de proyecto...');
       await new Promise(resolve => setTimeout(resolve, 10000));
     
       // ✅ PASO 4: OBTENER PROYECTO FRESCO (FORZAR LECTURA SIN CACHE)
@@ -624,19 +624,26 @@ app.post('/chatwoot-webhook', async (req, res) => {
       proyecto = await getConversationProject(conversationId);
       console.log(`🔄 Proyecto verificado después de espera: ${proyecto || 'no definido'}`);
     
-      // ✅ PASO 5: SIEMPRE ETIQUETAR (incluso si no hay proyecto)
-      const proyectoParaEtiquetar = proyecto || 'null';
-      console.log(`🏷️ Proceso completado. Etiquetando con proyecto: ${proyectoParaEtiquetar}`);
-      
-      const team = await assignLabelByProject(conversationId, proyectoParaEtiquetar);
-      
-      if (team) {
-        console.log(`✅ Etiqueta asignada exitosamente: ${team}`);
+      // ✅ PASO 5: AHORA SÍ - ETIQUETAR LA CONVERSACIÓN
+      if (proyecto) {
+        console.log(`🏷️ Proceso completado. Etiquetando con proyecto: ${proyecto}`);
+        const team = await assignLabelByProject(conversationId, proyecto);
+        
+        if (team) {
+          console.log(`✅ Etiqueta asignada exitosamente: ${team}`);
+        } else {
+          console.log('⚠️ No se pudo asignar etiqueta');
+          await sendChatwootMessage(
+            conversationId,
+            `⚠️ Proyecto "${proyecto}" no mapeado a ningún equipo`,
+            true
+          );
+        }
       } else {
-        console.log('⚠️ No se pudo asignar etiqueta');
+        console.log('⚠️ No hay proyecto definido después de espera. No se asignó etiqueta.');
         await sendChatwootMessage(
           conversationId,
-          `⚠️ Proyecto "${proyectoParaEtiquetar}" no mapeado a ningún equipo`,
+          '⚠️ No se pudo asignar etiqueta: proyecto no definido después de sincronización',
           true
         );
       }
@@ -644,8 +651,8 @@ app.post('/chatwoot-webhook', async (req, res) => {
       // ✅ PASO 6: MARCAR COMO PROCESADA
       markConversationAsProcessed(conversationId);
     
-      return res.json({ ok: true, completed: true, proyecto, team, etiquetado: true });
-    }
+      return res.json({ ok: true, completed: true, proyecto, etiquetado: !!proyecto });
+}
 
     // Enviar siguiente mensaje
     try {
