@@ -106,55 +106,17 @@ function isBusinessHours() {
 }
 
 // ================================
-// CONTROL DE CONVERSACIONES PROCESADAS (MEJORADO)
+// CONTROL DE CONVERSACIONES PROCESADAS
 // ================================
-const processedConversations = new Map(); // ✅ Cambiar Set por Map para guardar timestamp
+const processedConversations = new Set();
 
 function isConversationProcessed(conversationId) {
-  const processed = processedConversations.get(conversationId);
-  
-  // Si existe y no han pasado más de 5 minutos, está procesada
-  if (processed && Date.now() - processed < 300000) {
-    console.log(`🔒 Conversación ${conversationId} bloqueada (procesada hace ${Math.round((Date.now() - processed) / 1000)}s)`);
-    return true;
-  }
-  
-  // Si ya pasaron 5 minutos, liberar automáticamente
-  if (processed) {
-    console.log(`🔓 Conversación ${conversationId} liberada (timeout 5 min)`);
-    processedConversations.delete(conversationId);
-  }
-  
-  return false;
+  return processedConversations.has(conversationId);
 }
 
 function markConversationAsProcessed(conversationId) {
-  const timestamp = Date.now();
-  processedConversations.set(conversationId, timestamp);
-  console.log(`✅ Conversación ${conversationId} marcada como procesada`);
+  processedConversations.add(conversationId);
 }
-
-function releaseConversation(conversationId) {
-  processedConversations.delete(conversationId);
-  console.log(`🔓 Conversación ${conversationId} liberada manualmente`);
-}
-
-// Limpieza automática cada minuto
-setInterval(() => {
-  const now = Date.now();
-  let cleaned = 0;
-  
-  for (const [id, timestamp] of processedConversations.entries()) {
-    if (now - timestamp > 300000) { // 5 minutos
-      processedConversations.delete(id);
-      cleaned++;
-    }
-  }
-  
-  if (cleaned > 0) {
-    console.log(`🧹 Limpieza automática: ${cleaned} conversaciones liberadas`);
-  }
-}, 60000); // Cada minuto
 
 // ================================
 // CACHE SIMPLE PARA REDUCIR LLAMADAS
@@ -513,20 +475,17 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.status(200).json({ ignored: 'conversation finished' });
     }
 
-// ============================
-// INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
-// ============================
-if (!currentState) {
+    // ============================
+    // INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
+    // ============================
+    if (!currentState) {
       console.log('🔍 Sin estado actual. Verificando si hay proyecto...');
       
-      // 🔒 MARCAR COMO PROCESADA INMEDIATAMENTE (ANTES DE TODO)
-      markConversationAsProcessed(conversationId);
-      
       if (!proyecto) {
-        console.log('⏳ No hay proyecto. Esperando 8 segundos y verificando de nuevo...');
+        console.log('⏳ No hay proyecto. Esperando 10 segundos y verificando de nuevo...');
         
-        // Esperar 8 segundos para que n8n configure el proyecto
-        await new Promise(resolve => setTimeout(resolve, 8000));
+        // Esperar 10 segundos para que n8n configure el proyecto
+        await new Promise(resolve => setTimeout(resolve, 10000));
         
         // Verificar de nuevo
         proyecto = await getConversationProject(conversationId);
@@ -536,57 +495,51 @@ if (!currentState) {
           console.log('⚠️ Proyecto no configurado después de espera. Iniciando sin proyecto.');
         }
       }
-    
+
       console.log(`🚀 Iniciando flujo automáticamente ${proyecto ? `con proyecto: ${proyecto}` : 'sin proyecto'}`);
-    
+
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-    
+
         // Asignar conversación si hay assignee_id disponible
         if (conversation.meta?.assignee) {
           await assignConversation(conversationId, conversation.meta.assignee.id);
         }
-    
+
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'sin proyecto'}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
           true
         );
-    
+
         return res.json({ ok: true, started: true, proyecto });
-        
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
-        releaseConversation(conversationId); // ✅ Liberar si falla
         return res.status(500).json({ error: 'failed to start flow' });
       }
     }
-// ============================
-// VALIDAR RESPUESTA SEGÚN ESTADO
-// ============================
-  if (!isValidResponse(currentState, userMessage)) {
-    console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
-  
-    // ⚠️ NO marcar como procesada aquí - el usuario puede reintentar
-    
-    let helpMessage = '';
-    if (VALID_RESPONSES[currentState]) {
-      helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
-    } else {
-      helpMessage = '⚠️ Espere mientras un asesor lo atiende';
+
+    // ============================
+    // VALIDAR RESPUESTA SEGÚN ESTADO
+    // ============================
+    if (!isValidResponse(currentState, userMessage)) {
+      console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
+
+      let helpMessage = '';
+      if (VALID_RESPONSES[currentState]) {
+        helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
+      } else {
+        helpMessage = '⚠️ Espere mientras un asesor lo atiende';
+      }
+
+      await sendChatwootMessage(conversationId, helpMessage);
+      return res.status(200).json({ ok: true, message: 'invalid response' });
     }
-  
-    await sendChatwootMessage(conversationId, helpMessage);
-    return res.status(200).json({ ok: true, message: 'invalid response' });
-  }
-  
-  // 🔒 MARCAR COMO PROCESADA AQUÍ (respuesta válida recibida)
-  markConversationAsProcessed(conversationId);
-  
-  // ============================
-  // GUARDAR RESPUESTAS INFORMATIVAS
-  // ============================
+
+    // ============================
+    // GUARDAR RESPUESTAS INFORMATIVAS
+    // ============================
     if (
       currentState === 'seleccion_distancia_transporte' ||
       currentState === 'seleccion_medio_transporte'
@@ -662,7 +615,7 @@ if (!currentState) {
     
       // ✅ PASO 3: ESPERAR 3 SEGUNDOS para que n8n sincronice el proyecto
       console.log('⏳ Esperando 3 segundos para sincronización de proyecto...');
-      await new Promise(resolve => setTimeout(resolve, 8000));
+      await new Promise(resolve => setTimeout(resolve, 10000));
     
       // ✅ PASO 4: OBTENER PROYECTO FRESCO (FORZAR LECTURA SIN CACHE)
       const cacheKey = `attrs_${conversationId}`;
@@ -721,21 +674,22 @@ if (!currentState) {
 
       res.json({ ok: true, nextStep });
     } catch (error) {
-        console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
-      
-        await sendChatwootMessage(
-          conversationId,
-          '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
-          false
-        );
-      
-        await updateConversationState(conversationId, 'error');
-      
-        releaseConversation(conversationId); // ✅ Añadir esta línea
-        console.log('🚫 Error técnico. Sin etiquetado.');
-      
-        res.status(500).json({ error: 'send message failed' });
-      }
+      console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
+
+      await sendChatwootMessage(
+        conversationId,
+        '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
+        false
+      );
+
+      await updateConversationState(conversationId, 'error');
+
+      // ⚠️ NO SE ETIQUETA EN ERRORES TÉCNICOS
+      markConversationAsProcessed(conversationId);
+      console.log('🚫 Error técnico. Sin etiquetado.');
+
+      res.status(500).json({ error: 'send message failed' });
+    }
   } catch (error) {
     console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
