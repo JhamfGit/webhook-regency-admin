@@ -513,16 +513,19 @@ app.post('/chatwoot-webhook', async (req, res) => {
       return res.status(200).json({ ignored: 'conversation finished' });
     }
 
-    // ============================
-    // INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
-    // ============================
-    if (!currentState) {
+// ============================
+// INICIAR FLUJO (ESPERAR 2 SEGUNDOS SI NO HAY PROYECTO)
+// ============================
+if (!currentState) {
       console.log('🔍 Sin estado actual. Verificando si hay proyecto...');
       
+      // 🔒 MARCAR COMO PROCESADA INMEDIATAMENTE (ANTES DE TODO)
+      markConversationAsProcessed(conversationId);
+      
       if (!proyecto) {
-        console.log('⏳ No hay proyecto. Esperando 10 segundos y verificando de nuevo...');
+        console.log('⏳ No hay proyecto. Esperando 8 segundos y verificando de nuevo...');
         
-        // Esperar 10 segundos para que n8n configure el proyecto
+        // Esperar 8 segundos para que n8n configure el proyecto
         await new Promise(resolve => setTimeout(resolve, 8000));
         
         // Verificar de nuevo
@@ -533,51 +536,57 @@ app.post('/chatwoot-webhook', async (req, res) => {
           console.log('⚠️ Proyecto no configurado después de espera. Iniciando sin proyecto.');
         }
       }
-
+    
       console.log(`🚀 Iniciando flujo automáticamente ${proyecto ? `con proyecto: ${proyecto}` : 'sin proyecto'}`);
-
+    
       try {
         await sendWhatsAppTemplate(userPhone, 'seleccion_certificado_bachiller');
         await updateConversationState(conversationId, 'seleccion_certificado_bachiller');
-
+    
         // Asignar conversación si hay assignee_id disponible
         if (conversation.meta?.assignee) {
           await assignConversation(conversationId, conversation.meta.assignee.id);
         }
-
+    
         await sendChatwootMessage(
           conversationId,
-          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto}`,
+          `✅ Flujo iniciado: Certificado de bachiller\n📋 Proyecto: ${proyecto || 'sin proyecto'}`,
           true
         );
-
+    
         return res.json({ ok: true, started: true, proyecto });
+        
       } catch (error) {
         console.error('❌ Error iniciando flujo:', error.message);
+        releaseConversation(conversationId); // ✅ Liberar si falla
         return res.status(500).json({ error: 'failed to start flow' });
       }
     }
-
-    // ============================
-    // VALIDAR RESPUESTA SEGÚN ESTADO
-    // ============================
-    if (!isValidResponse(currentState, userMessage)) {
-      console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
-
-      let helpMessage = '';
-      if (VALID_RESPONSES[currentState]) {
-        helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
-      } else {
-        helpMessage = '⚠️ Espere mientras un asesor lo atiende';
-      }
-
-      await sendChatwootMessage(conversationId, helpMessage);
-      return res.status(200).json({ ok: true, message: 'invalid response' });
+// ============================
+// VALIDAR RESPUESTA SEGÚN ESTADO
+// ============================
+  if (!isValidResponse(currentState, userMessage)) {
+    console.log(`⚠️ Respuesta inválida para estado: ${currentState}`);
+  
+    // ⚠️ NO marcar como procesada aquí - el usuario puede reintentar
+    
+    let helpMessage = '';
+    if (VALID_RESPONSES[currentState]) {
+      helpMessage = '⚠️ Por favor selecciona una opción del menú usando el botón "Ver opciones".';
+    } else {
+      helpMessage = '⚠️ Espere mientras un asesor lo atiende';
     }
-
-    // ============================
-    // GUARDAR RESPUESTAS INFORMATIVAS
-    // ============================
+  
+    await sendChatwootMessage(conversationId, helpMessage);
+    return res.status(200).json({ ok: true, message: 'invalid response' });
+  }
+  
+  // 🔒 MARCAR COMO PROCESADA AQUÍ (respuesta válida recibida)
+  markConversationAsProcessed(conversationId);
+  
+  // ============================
+  // GUARDAR RESPUESTAS INFORMATIVAS
+  // ============================
     if (
       currentState === 'seleccion_distancia_transporte' ||
       currentState === 'seleccion_medio_transporte'
@@ -712,22 +721,21 @@ app.post('/chatwoot-webhook', async (req, res) => {
 
       res.json({ ok: true, nextStep });
     } catch (error) {
-      console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
-
-      await sendChatwootMessage(
-        conversationId,
-        '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
-        false
-      );
-
-      await updateConversationState(conversationId, 'error');
-
-      // ⚠️ NO SE ETIQUETA EN ERRORES TÉCNICOS
-      markConversationAsProcessed(conversationId);
-      console.log('🚫 Error técnico. Sin etiquetado.');
-
-      res.status(500).json({ error: 'send message failed' });
-    }
+        console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
+      
+        await sendChatwootMessage(
+          conversationId,
+          '❌ Ocurrió un error técnico. Por favor contacta al equipo de soporte.',
+          false
+        );
+      
+        await updateConversationState(conversationId, 'error');
+      
+        releaseConversation(conversationId); // ✅ Añadir esta línea
+        console.log('🚫 Error técnico. Sin etiquetado.');
+      
+        res.status(500).json({ error: 'send message failed' });
+      }
   } catch (error) {
     console.error('❌ ERROR GENERAL:', error.response?.data || error.message);
     res.status(500).json({ error: 'Webhook error' });
