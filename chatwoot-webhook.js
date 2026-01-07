@@ -106,17 +106,55 @@ function isBusinessHours() {
 }
 
 // ================================
-// CONTROL DE CONVERSACIONES PROCESADAS
+// CONTROL DE CONVERSACIONES PROCESADAS (MEJORADO)
 // ================================
-const processedConversations = new Set();
+const processedConversations = new Map(); // ✅ Cambiar Set por Map para guardar timestamp
 
 function isConversationProcessed(conversationId) {
-  return processedConversations.has(conversationId);
+  const processed = processedConversations.get(conversationId);
+  
+  // Si existe y no han pasado más de 5 minutos, está procesada
+  if (processed && Date.now() - processed < 300000) {
+    console.log(`🔒 Conversación ${conversationId} bloqueada (procesada hace ${Math.round((Date.now() - processed) / 1000)}s)`);
+    return true;
+  }
+  
+  // Si ya pasaron 5 minutos, liberar automáticamente
+  if (processed) {
+    console.log(`🔓 Conversación ${conversationId} liberada (timeout 5 min)`);
+    processedConversations.delete(conversationId);
+  }
+  
+  return false;
 }
 
 function markConversationAsProcessed(conversationId) {
-  processedConversations.add(conversationId);
+  const timestamp = Date.now();
+  processedConversations.set(conversationId, timestamp);
+  console.log(`✅ Conversación ${conversationId} marcada como procesada`);
 }
+
+function releaseConversation(conversationId) {
+  processedConversations.delete(conversationId);
+  console.log(`🔓 Conversación ${conversationId} liberada manualmente`);
+}
+
+// Limpieza automática cada minuto
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  
+  for (const [id, timestamp] of processedConversations.entries()) {
+    if (now - timestamp > 300000) { // 5 minutos
+      processedConversations.delete(id);
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`🧹 Limpieza automática: ${cleaned} conversaciones liberadas`);
+  }
+}, 60000); // Cada minuto
 
 // ================================
 // CACHE SIMPLE PARA REDUCIR LLAMADAS
