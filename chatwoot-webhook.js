@@ -1,3 +1,7 @@
+// ================================
+// CÓDIGO 2: WEBHOOK (Express.js)
+// ================================
+
 const express = require('express');
 const axios = require('axios');
 const app = express();
@@ -29,6 +33,10 @@ const TEMPLATE_CONFIG = {
   'seleccion_vinculacion_previa': {
     type: 'simple',
     name: 'seleccion_vinculacion_previa'
+  },
+  'confirmacion_respuesta': {
+    type: 'simple',
+    name: 'confirmacion_respuesta'
   },
   
   // Templates con listas interactivas
