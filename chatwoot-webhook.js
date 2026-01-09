@@ -34,9 +34,9 @@ const TEMPLATE_CONFIG = {
     type: 'simple',
     name: 'seleccion_vinculacion_previa'
   },
-  'confirmacion_respuesta': {
+  'confirmacion_1': {
     type: 'simple',
-    name: 'confirmacion_respuesta'
+    name: 'confirmacion_1'
   },
   
   // Templates con listas interactivas
