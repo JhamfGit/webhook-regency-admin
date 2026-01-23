@@ -12,9 +12,9 @@ app.use(express.json());
 // ================================
 const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
-const CHATWOOT_API_URL = process.env.CHATWOOT_URL; // ej: https://app.chatwoot.com
-const CHATWOOT_API_TOKEN = process.env.API_KEY;
-const CHATWOOT_ACCOUNT_ID = process.env.ACCOUNT_ID;
+const CHATWOOT_API_URL = process.env.CHATWOOT_URL; // URL de Chatwoot
+const CHATWOOT_API_TOKEN = process.env.API_KEY; // API Key de Chatwoot
+const CHATWOOT_ACCOUNT_ID = process.env.ACCOUNT_ID; // Account ID de Chatwoot
 
 // ================================
 // MAPEO DE TEMPLATES
@@ -203,13 +203,21 @@ async function sendTransporteList(phone) {
 async function findChatwootConversation(phone) {
   try {
     if (!CHATWOOT_API_URL || !CHATWOOT_API_TOKEN || !CHATWOOT_ACCOUNT_ID) {
-      console.log('⚠️  Chatwoot no configurado, saltando búsqueda de conversación');
+      console.log('⚠️  Chatwoot no configurado:');
+      console.log('   CHATWOOT_URL:', CHATWOOT_API_URL ? '✓' : '✗');
+      console.log('   API_KEY:', CHATWOOT_API_TOKEN ? '✓' : '✗');
+      console.log('   ACCOUNT_ID:', CHATWOOT_ACCOUNT_ID ? '✓' : '✗');
       return null;
     }
 
+    console.log('🔍 Buscando conversación en Chatwoot...');
+    console.log('   URL:', CHATWOOT_API_URL);
+    console.log('   Account ID:', CHATWOOT_ACCOUNT_ID);
+    
     const cleanPhone = phone.replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '');
     
     // Buscar contacto por número de teléfono
+    console.log('   🔎 Buscando contacto con teléfono:', cleanPhone);
     const searchResponse = await axios.get(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/search`,
       {
@@ -222,15 +230,18 @@ async function findChatwootConversation(phone) {
       }
     );
 
+    console.log('   📊 Respuesta de búsqueda:', JSON.stringify(searchResponse.data, null, 2));
+
     if (!searchResponse.data.payload || searchResponse.data.payload.length === 0) {
       console.log('ℹ️  No se encontró contacto en Chatwoot para:', cleanPhone);
       return null;
     }
 
     const contact = searchResponse.data.payload[0];
-    console.log(`✅ Contacto encontrado en Chatwoot - ID: ${contact.id}`);
+    console.log(`✅ Contacto encontrado en Chatwoot - ID: ${contact.id}, Nombre: ${contact.name}`);
 
     // Buscar conversaciones del contacto
+    console.log('   🔎 Buscando conversaciones del contacto...');
     const conversationsResponse = await axios.get(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/${contact.id}/conversations`,
       {
@@ -241,6 +252,8 @@ async function findChatwootConversation(phone) {
         timeout: 5000
       }
     );
+
+    console.log('   📊 Conversaciones encontradas:', conversationsResponse.data.payload?.length || 0);
 
     // Buscar la conversación más reciente que esté abierta
     const conversations = conversationsResponse.data.payload || [];
@@ -262,7 +275,10 @@ async function findChatwootConversation(phone) {
     return null;
 
   } catch (error) {
-    console.error('❌ Error buscando conversación en Chatwoot:', error.message);
+    console.error('❌ Error buscando conversación en Chatwoot:');
+    console.error('   Mensaje:', error.message);
+    console.error('   Status:', error.response?.status);
+    console.error('   Data:', JSON.stringify(error.response?.data, null, 2));
     return null;
   }
 }
@@ -282,6 +298,9 @@ async function sendChatwootPrivateNote(conversationId, message) {
       return false;
     }
 
+    console.log('📝 Enviando nota privada a conversación:', conversationId);
+    console.log('   Mensaje:', message);
+
     const response = await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
@@ -298,11 +317,14 @@ async function sendChatwootPrivateNote(conversationId, message) {
       }
     );
 
-    console.log('✅ Nota privada enviada a Chatwoot');
+    console.log('✅ Nota privada enviada a Chatwoot - ID:', response.data.id);
     return true;
 
   } catch (error) {
-    console.error('❌ Error enviando nota privada a Chatwoot:', error.response?.data || error.message);
+    console.error('❌ Error enviando nota privada a Chatwoot:');
+    console.error('   Mensaje:', error.message);
+    console.error('   Status:', error.response?.status);
+    console.error('   Data:', JSON.stringify(error.response?.data, null, 2));
     return false;
   }
 }
@@ -366,13 +388,18 @@ app.post('/send-template', async (req, res) => {
     console.log(`📊 Response ID: ${response.data.messages?.[0]?.id || 'N/A'}`);
 
     // Enviar nota privada a Chatwoot (no bloqueante)
+    console.log('🔄 Procesando notificación a Chatwoot...');
     const conversationId = await findChatwootConversation(cleanPhone);
+    
     if (conversationId) {
       const chatwootMessage = templateConfig.chatwootMessage || `📤 Template enviado: ${template}`;
       const timestamp = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
       const fullMessage = `${chatwootMessage}\n⏰ ${timestamp}\n📱 Teléfono: +${cleanPhone}`;
       
-      await sendChatwootPrivateNote(conversationId, fullMessage);
+      const notificationSent = await sendChatwootPrivateNote(conversationId, fullMessage);
+      console.log('📬 Notificación Chatwoot:', notificationSent ? 'Enviada ✅' : 'Fallida ❌');
+    } else {
+      console.log('⚠️  No se encontró conversación en Chatwoot para notificar');
     }
 
     res.json({ 
