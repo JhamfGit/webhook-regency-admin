@@ -12,6 +12,9 @@ app.use(express.json());
 // ================================
 const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
+const CHATWOOT_API_URL = process.env.CHATWOOT_URL; // ej: https://app.chatwoot.com
+const CHATWOOT_API_TOKEN = process.env.API_KEY;
+const CHATWOOT_ACCOUNT_ID = process.env.ACCOUNT_ID;
 
 // ================================
 // MAPEO DE TEMPLATES
@@ -20,33 +23,40 @@ const TEMPLATE_CONFIG = {
   // Templates simples (solo nombre)
   'seleccion_certificado_bachiller': {
     type: 'simple',
-    name: 'seleccion_certificado_bachiller'
+    name: 'seleccion_certificado_bachiller',
+    chatwootMessage: '📤 Template enviado: Selección de certificado de bachiller'
   },
   'seleccion_ubicacion_desplazamiento': {
     type: 'simple',
-    name: 'seleccion_ubicacion_desplazamiento'
+    name: 'seleccion_ubicacion_desplazamiento',
+    chatwootMessage: '📤 Template enviado: Selección de ubicación y desplazamiento'
   },
   'seleccion_familiares_empresa': {
     type: 'simple',
-    name: 'seleccion_familiares_empresa'
+    name: 'seleccion_familiares_empresa',
+    chatwootMessage: '📤 Template enviado: Selección de familiares en la empresa'
   },
   'seleccion_vinculacion_previa': {
     type: 'simple',
-    name: 'seleccion_vinculacion_previa'
+    name: 'seleccion_vinculacion_previa',
+    chatwootMessage: '📤 Template enviado: Selección de vinculación previa'
   },
   'confirmacion_1': {
     type: 'simple',
-    name: 'confirmacion_1'
+    name: 'confirmacion_1',
+    chatwootMessage: '📤 Template enviado: Confirmación 1'
   },
   
   // Templates con listas interactivas
   'seleccion_distancia_transporte': {
     type: 'list',
-    name: 'seleccion_distancia_transporte'
+    name: 'seleccion_distancia_transporte',
+    chatwootMessage: '📤 Template enviado: Selección de distancia al trabajo (lista interactiva)'
   },
   'seleccion_medio_transporte': {
     type: 'list',
-    name: 'seleccion_medio_transporte'
+    name: 'seleccion_medio_transporte',
+    chatwootMessage: '📤 Template enviado: Selección de medio de transporte (lista interactiva)'
   }
 };
 
@@ -57,7 +67,8 @@ app.get('/', (_, res) => {
   res.status(200).json({ 
     status: 'OK', 
     service: 'WhatsApp Template Sender',
-    templates: Object.keys(TEMPLATE_CONFIG)
+    templates: Object.keys(TEMPLATE_CONFIG),
+    chatwoot_configured: !!(CHATWOOT_API_URL && CHATWOOT_API_TOKEN)
   });
 });
 
@@ -187,6 +198,116 @@ async function sendTransporteList(phone) {
 }
 
 // ================================
+// FUNCIÓN: BUSCAR CONVERSACIÓN EN CHATWOOT
+// ================================
+async function findChatwootConversation(phone) {
+  try {
+    if (!CHATWOOT_API_URL || !CHATWOOT_API_TOKEN || !CHATWOOT_ACCOUNT_ID) {
+      console.log('⚠️  Chatwoot no configurado, saltando búsqueda de conversación');
+      return null;
+    }
+
+    const cleanPhone = phone.replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '');
+    
+    // Buscar contacto por número de teléfono
+    const searchResponse = await axios.get(
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/search`,
+      {
+        params: { q: cleanPhone },
+        headers: {
+          'api_access_token': CHATWOOT_API_TOKEN,
+          'Content-Type': 'application/json'
+        },
+        timeout: 5000
+      }
+    );
+
+    if (!searchResponse.data.payload || searchResponse.data.payload.length === 0) {
+      console.log('ℹ️  No se encontró contacto en Chatwoot para:', cleanPhone);
+      return null;
+    }
+
+    const contact = searchResponse.data.payload[0];
+    console.log(`✅ Contacto encontrado en Chatwoot - ID: ${contact.id}`);
+
+    // Buscar conversaciones del contacto
+    const conversationsResponse = await axios.get(
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/${contact.id}/conversations`,
+      {
+        headers: {
+          'api_access_token': CHATWOOT_API_TOKEN,
+          'Content-Type': 'application/json'
+        },
+        timeout: 5000
+      }
+    );
+
+    // Buscar la conversación más reciente que esté abierta
+    const conversations = conversationsResponse.data.payload || [];
+    const openConversation = conversations.find(conv => conv.status === 'open');
+    
+    if (openConversation) {
+      console.log(`✅ Conversación abierta encontrada - ID: ${openConversation.id}`);
+      return openConversation.id;
+    }
+
+    // Si no hay conversación abierta, usar la más reciente
+    if (conversations.length > 0) {
+      const latestConversation = conversations[0];
+      console.log(`✅ Usando conversación más reciente - ID: ${latestConversation.id}`);
+      return latestConversation.id;
+    }
+
+    console.log('ℹ️  No se encontraron conversaciones para este contacto');
+    return null;
+
+  } catch (error) {
+    console.error('❌ Error buscando conversación en Chatwoot:', error.message);
+    return null;
+  }
+}
+
+// ================================
+// FUNCIÓN: ENVIAR NOTA PRIVADA A CHATWOOT
+// ================================
+async function sendChatwootPrivateNote(conversationId, message) {
+  try {
+    if (!CHATWOOT_API_URL || !CHATWOOT_API_TOKEN || !CHATWOOT_ACCOUNT_ID) {
+      console.log('⚠️  Chatwoot no configurado, saltando envío de nota privada');
+      return false;
+    }
+
+    if (!conversationId) {
+      console.log('⚠️  No hay ID de conversación, no se puede enviar nota privada');
+      return false;
+    }
+
+    const response = await axios.post(
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
+      {
+        content: message,
+        message_type: 'outgoing',
+        private: true
+      },
+      {
+        headers: {
+          'api_access_token': CHATWOOT_API_TOKEN,
+          'Content-Type': 'application/json'
+        },
+        timeout: 5000
+      }
+    );
+
+    console.log('✅ Nota privada enviada a Chatwoot');
+    return true;
+
+  } catch (error) {
+    console.error('❌ Error enviando nota privada a Chatwoot:', error.response?.data || error.message);
+    return false;
+  }
+}
+
+// ================================
 // ENDPOINT PRINCIPAL: ENVIAR TEMPLATE
 // ================================
 app.post('/send-template', async (req, res) => {
@@ -244,12 +365,23 @@ app.post('/send-template', async (req, res) => {
     console.log(`✅ Template enviado exitosamente`);
     console.log(`📊 Response ID: ${response.data.messages?.[0]?.id || 'N/A'}`);
 
+    // Enviar nota privada a Chatwoot (no bloqueante)
+    const conversationId = await findChatwootConversation(cleanPhone);
+    if (conversationId) {
+      const chatwootMessage = templateConfig.chatwootMessage || `📤 Template enviado: ${template}`;
+      const timestamp = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+      const fullMessage = `${chatwootMessage}\n⏰ ${timestamp}\n📱 Teléfono: +${cleanPhone}`;
+      
+      await sendChatwootPrivateNote(conversationId, fullMessage);
+    }
+
     res.json({ 
       success: true,
       template: template,
       phone: cleanPhone,
       message_id: response.data.messages?.[0]?.id,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      chatwoot_notified: !!conversationId
     });
 
   } catch (error) {
@@ -277,7 +409,8 @@ app.get('/templates', (req, res) => {
   const templates = Object.entries(TEMPLATE_CONFIG).map(([key, config]) => ({
     name: key,
     type: config.type,
-    description: config.type === 'list' ? 'Lista interactiva' : 'Template simple'
+    description: config.type === 'list' ? 'Lista interactiva' : 'Template simple',
+    chatwoot_message: config.chatwootMessage
   }));
 
   res.json({
@@ -293,6 +426,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 WhatsApp Template Sender running on port ${PORT}`);
   console.log(`📋 Templates disponibles: ${Object.keys(TEMPLATE_CONFIG).length}`);
+  console.log(`💬 Chatwoot: ${CHATWOOT_API_URL ? 'Configurado ✅' : 'No configurado ⚠️'}`);
   console.log(`🔗 Endpoints:`);
   console.log(`   POST /send-template - Enviar template`);
   console.log(`   GET  /templates     - Listar templates`);
